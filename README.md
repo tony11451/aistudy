@@ -16,7 +16,7 @@
 | 💬 AI 对话 | 多会话流式对话，自动携带学习档案 + 进度 + 相关错题上下文 |
 | 🧬 学习档案 | AI 第二大脑：自动维护弱点画像，越用越懂你 |
 | 📊 进度看板 | 各科掌握度统计 + AI 学习报告 |
-| 👥 多用户 | 管理员创建账号，每人独立数据；API Key 全局共享 + 个人覆盖 |
+| 👥 多用户 | 学生/家长自由注册（局域网内部署），管理员可停用用户；API Key 全局共享 + 个人覆盖 |
 
 ## 快速部署（Docker）
 
@@ -24,7 +24,7 @@
 docker compose up -d --build
 ```
 
-打开 `http://<NAS-IP>:8000`，首次访问创建管理员 → 进入「设置 → 全局 AI」填写 API。
+打开 `http://<NAS-IP>:8000`，首次访问初始化管理员 → 进入「设置 → 全局 AI」填写 API。之后学生/家长可自由注册（登录页 → 注册）。
 
 > 默认 `Dockerfile` 为单阶段构建（前端 `frontend/dist` 已预构建好），只需拉取 `python:3.12-slim` 一个基础镜像。
 > 若修改了前端源码，先 `cd frontend && npm run build` 再构建镜像；或改用 `Dockerfile.full`（`docker build -f Dockerfile.full .`）从源码完整构建。
