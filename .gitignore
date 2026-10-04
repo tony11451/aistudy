@@ -30,3 +30,7 @@ Thumbs.db
 
 # 浏览器保存页面的缓存资源目录（保留 HTML 正文即可）
 Docs/*_files/
+
+# TS ��������
+tsconfig.tsbuildinfo
+
