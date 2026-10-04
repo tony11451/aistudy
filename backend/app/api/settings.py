@@ -1,0 +1,89 @@
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..deps import get_current_user, require_admin
+from ..models import AppSettings, User
+from ..schemas import GlobalSettingsIn, PersonalSettingsIn
+from ..services.context import resolve_ai_config
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+def _get_row(db: Session) -> AppSettings:
+    row = db.query(AppSettings).filter(AppSettings.id == 1).first()
+    if not row:
+        row = AppSettings(id=1)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def _mask(key: str) -> str:
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "*" * len(key)
+    return key[:4] + "*" * 8 + key[-4:]
+
+
+@router.get("")
+def get_settings(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    cfg = resolve_ai_config(db, user)
+    row = _get_row(db)
+    return {
+        "effective": {
+            "api_base_url": cfg["api_base_url"],
+            "chat_model": cfg["chat_model"],
+            "vision_model": cfg["vision_model"],
+            "temperature": cfg["temperature"],
+            "has_key": bool(cfg["api_key"]),
+        },
+        "global": {
+            "api_base_url": row.api_base_url,
+            "api_key_masked": _mask(row.api_key),
+            "has_key": bool(row.api_key),
+            "chat_model": row.chat_model,
+            "vision_model": row.vision_model,
+            "temperature": row.temperature,
+            "system_extra_prompt": row.system_extra_prompt,
+        },
+        "personal": {
+            "api_base_url": user.api_base_url,
+            "api_key_masked": _mask(user.api_key),
+            "has_key": bool(user.api_key),
+            "chat_model": user.chat_model,
+            "vision_model": user.vision_model,
+            "grade": user.grade,
+        },
+    }
+
+
+@router.put("/global")
+def update_global(payload: GlobalSettingsIn, _: User = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    row = _get_row(db)
+    row.api_base_url = payload.api_base_url.strip()
+    if payload.api_key and not payload.api_key.startswith("***") and "*" not in payload.api_key[:6]:
+        row.api_key = payload.api_key.strip()
+    row.chat_model = payload.chat_model.strip()
+    row.vision_model = payload.vision_model.strip()
+    row.temperature = payload.temperature
+    row.system_extra_prompt = payload.system_extra_prompt
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/personal")
+def update_personal(payload: PersonalSettingsIn, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    user.api_base_url = payload.api_base_url.strip()
+    if payload.api_key and "*" not in payload.api_key[:6]:
+        user.api_key = payload.api_key.strip()
+    user.chat_model = payload.chat_model.strip()
+    user.vision_model = payload.vision_model.strip()
+    if payload.grade:
+        user.grade = payload.grade
+    db.commit()
+    return {"ok": True}

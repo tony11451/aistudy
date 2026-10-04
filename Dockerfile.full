@@ -1,0 +1,29 @@
+# 完整多阶段构建：在镜像内从源码构建前端（需拉取 node + python 两个基础镜像）
+# NAS 环境建议用默认 Dockerfile（单阶段，已含预构建前端），构建更快更省资源
+# 镜像源默认走可用加速源（绕过 fnOS 等 NAS 失效的默认加速器），可用 --build-arg 改回官方源：
+#   docker build -f Dockerfile.full --build-arg NODE_IMAGE=node:22-alpine --build-arg PYTHON_IMAGE=python:3.12-slim .
+ARG NODE_IMAGE=docker.1ms.run/library/node:22-alpine
+ARG PYTHON_IMAGE=docker.1ms.run/library/python:3.12-slim
+
+FROM ${NODE_IMAGE} AS frontend
+WORKDIR /build
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install --no-fund --no-audit
+COPY frontend/ ./
+RUN npm run build
+
+FROM ${PYTHON_IMAGE}
+WORKDIR /app
+
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+COPY backend/ ./
+COPY --from=frontend /build/dist /frontend/dist
+
+ENV DATA_DIR=/data
+RUN mkdir -p /data/images
+VOLUME ["/data"]
+
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,35 @@
+{
+  "name": "ai-wrong-question",
+  "Image": "ai-wrong-question:latest",
+  "Hostname": "ai-wrong-question",
+  "WorkingDir": "/app",
+  "Env": [
+    "DATA_DIR=/data",
+    "TZ=Asia/Shanghai",
+    "PYTHONUNBUFFERED=1"
+  ],
+  "ExposedPorts": {
+    "8000/tcp": {}
+  },
+  "HostConfig": {
+    "Binds": [
+      "/volume1/docker/ai-wrong-question/data:/data"
+    ],
+    "PortBindings": {
+      "8000/tcp": [
+        { "HostIp": "0.0.0.0", "HostPort": "8000" }
+      ]
+    },
+    "RestartPolicy": {
+      "Name": "unless-stopped",
+      "MaximumRetryCount": 0
+    },
+    "NetworkMode": "bridge",
+    "Memory": 0,
+    "MemorySwap": 0
+  },
+  "Labels": {
+    "com.ugreen.app": "ai-wrong-question",
+    "com.ugreen.description": "AI 错题本 · 学习助手"
+  }
+}
