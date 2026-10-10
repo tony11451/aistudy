@@ -61,6 +61,21 @@ async def chat_completions(req: Request):
                              "knowledge_point": "材料题", "question_type": "材料分析"}, ensure_ascii=False)
     elif "学习分析师" in system:
         answer = "# 学习报告\n- 本周错题集中在因式分解\n- 下一步：每天10题"
+    elif "知识图谱整理员" in system and "重新完善" in system:
+        answer = json.dumps({
+            "name": "因式分解", "node_type": "knowledge", "confidence": "confirmed",
+            "description": "把多项式化为乘积形式，是解方程的基础工具。",
+            "children": [{"name": "十字相乘法"}, {"name": "公式法"}],
+            "reason": "结合错题发现方法类子方向缺失"}, ensure_ascii=False)
+    elif "知识图谱整理员" in system:
+        answer = json.dumps({"proposals": [
+            {"action": "add", "subject": "数学", "parent_name": "", "name": "因式分解",
+             "node_type": "knowledge", "confidence": "suspected", "reason": "对话重点讨论",
+             "children": [{"name": "十字相乘法", "node_type": "knowledge"},
+                          {"name": "公式法", "node_type": "knowledge"}]},
+            {"action": "add", "subject": "数学", "parent_name": "", "name": "符号错误",
+             "node_type": "weakness", "confidence": "suspected", "reason": "学生两次提到符号问题"},
+        ]}, ensure_ascii=False)
     else:
         answer = "这是关于「" + text[:20] + "」的详细讲解。第一步…第二步…"
 
@@ -198,8 +213,40 @@ r = c.post("/api/wrong-questions/analyze", headers=H, json={
 item = r.json()["items"][0]
 check("wq_image_saved", item.get("images") and item["images"][0].startswith("/api/images/"),
       str(item.get("images")))
+check("wq_original_saved", bool(item.get("original_images")))
 r = c.get(item["images"][0])
 check("image_served", r.status_code == 200 and len(r.content) > 100)
+
+# 13. 对话总结 → 节点提案 → 应用入库（v3 提问/图谱链路）
+conv = c.post("/api/chat/conversations", headers=H,
+              json={"title": "讨论因式分解", "subject": "数学", "grade": "初三"}).json()
+c.post(f"/api/chat/conversations/{conv['id']}/messages", headers=H,
+       json={"content": "因式分解怎么写", "image_ids": []})
+r = c.post(f"/api/chat/conversations/{conv['id']}/summarize", headers=H, json={})
+props = r.json().get("proposals", [])
+check("summarize_proposals", r.status_code == 200 and len(props) >= 2, r.text[:200])
+check("proposal_granularity", props[0]["name"] == "因式分解" and len(props[0].get("children") or []) == 2,
+      str(props)[:200])
+r = c.post("/api/knowledge/nodes/apply", headers=H, json={"proposals": props})
+check("apply_summarized", len(r.json()["applied"]) >= 4, r.text[:200])
+r = c.get("/api/knowledge/nodes?subject=数学", headers=H)
+names = [n["name"] for n in r.json()]
+check("nodes_in_graph", "因式分解" in names and "十字相乘法" in names and "符号错误" in names, str(names))
+
+# 14. 节点 AI 重新总结
+target = next(n for n in r.json() if n["name"] == "因式分解")
+r = c.post(f"/api/knowledge/nodes/{target['id']}/resummarize", headers=H, json={})
+check("node_resummarize", r.status_code == 200 and "乘积" in r.json()["description"], r.text[:200])
+check("resummarize_children", r.json()["id"] == target["id"])
+
+# 15. 多模型设置 + 会话模型
+c.put("/api/settings/models", headers=H,
+      json={"models": ["ma", "mb"], "assign": {"chat": "ma", "vision": "mb", "analysis": "ma"}})
+r = c.put(f"/api/chat/conversations/{conv['id']}", headers=H, json={"model_name": "mb"})
+check("conv_model_set", r.json()["model_name"] == "mb")
+r = c.post(f"/api/chat/conversations/{conv['id']}/messages", headers=H,
+           json={"content": "继续", "image_ids": [], "model": "mb"})
+check("chat_model_override", "event: done" in r.text, r.text[:100])
 
 failed = [n for n, o in ok if not o]
 print(f"\n=== {len(ok) - len(failed)}/{len(ok)} passed ===")

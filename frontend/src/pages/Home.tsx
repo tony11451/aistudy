@@ -1,7 +1,9 @@
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { Loading, MASTERY_LABEL, useAsync } from '../components'
+import { Btn, CardView, Loading, Badge } from '../ui'
+import { MASTERY_LABEL, masteryTone, useAsync } from '../components'
 import { useAuth } from '../store'
+import { IconMap, IconCamera } from '../icons'
 
 export default function Home() {
   const nav = useNavigate()
@@ -35,16 +37,17 @@ export default function Home() {
           <strong>{data?.goals?.length || 0}</strong> 个
         </p>
         <div className="row" style={{ marginTop: 16, gap: 10, flexWrap: 'wrap' }}>
-          <button className="md-btn md-btn-filled" onClick={() => nav('/wrong/new')}>
-            📸 拍错题
-          </button>
-          <button
-            className="md-btn"
-            style={{ background: 'rgba(255,255,255,0.2)', color: '#fff' }}
+          <Btn variant="filled" onClick={() => nav('/wrong/new')} leadingIcon={<IconCamera size={18} />}>
+            拍错题
+          </Btn>
+          <Btn
+            variant="tonal"
             onClick={() => nav('/mindmap')}
+            leadingIcon={<IconMap size={18} />}
+            style={{ background: 'rgba(255,255,255,0.22)', color: '#fff' }}
           >
-            🧠 看弱点图谱
-          </button>
+            看弱点图谱
+          </Btn>
         </div>
       </div>
 
@@ -70,8 +73,11 @@ export default function Home() {
             {allWeak.slice(0, 6).map((w) => (
               <button
                 key={w.subject + w.kp}
-                className="md-chip active"
-                onClick={() => nav(`/chat?kp=${encodeURIComponent(w.kp)}&subject=${encodeURIComponent(w.subject)}`)}
+                className="badge badge-weak"
+                style={{ border: 'none', cursor: 'pointer', minHeight: 34 }}
+                onClick={() =>
+                  nav(`/chat?kp=${encodeURIComponent(w.kp)}&subject=${encodeURIComponent(w.subject)}`)
+                }
               >
                 <span className="mastery-dot mastery-weak" />
                 {w.subject} · {w.kp}
@@ -85,32 +91,30 @@ export default function Home() {
         <div className="section-title" style={{ flex: 1 }}>
           最近错题
         </div>
-        <button className="md-btn md-btn-text md-btn-sm" onClick={() => nav('/wrong')}>
+        <Btn variant="text" sm onClick={() => nav('/wrong')}>
           全部 →
-        </button>
+        </Btn>
       </div>
       <div className="col">
         {(data?.stats?.items || []).map((w: any) => (
-          <div
-            key={w.id}
-            className="md-card md-card-tappable"
-            onClick={() => nav(`/wrong/${w.id}`)}
-          >
+          <CardView key={w.id} variant="filled" onClick={() => nav(`/wrong/${w.id}`)}>
             <div className="row">
-              <span className="badge badge-primary">{w.subject}</span>
-              {w.knowledge_points?.[0] && <span className="badge">{w.knowledge_points[0]}</span>}
+              <Badge tone="primary">{w.subject}</Badge>
+              {w.knowledge_points?.[0] && <Badge>{w.knowledge_points[0]}</Badge>}
               <span className="spacer" />
-              <span className={`badge badge-${w.mastery}`}>{MASTERY_LABEL[w.mastery] || w.mastery}</span>
+              <Badge tone={masteryTone(w.mastery)}>{MASTERY_LABEL[w.mastery] || w.mastery}</Badge>
             </div>
             <div className="clamp-2" style={{ marginTop: 8 }}>
               {w.question_text || '（图片题）'}
             </div>
-          </div>
+          </CardView>
         ))}
         {!data?.stats?.items?.length && (
-          <div className="md-card muted" style={{ textAlign: 'center' }}>
-            还没有错题，点击下方「错题」开始拍照上传吧
-          </div>
+          <CardView variant="outlined">
+            <div className="muted" style={{ textAlign: 'center' }}>
+              还没有错题，点击下方「错题」开始拍照上传吧
+            </div>
+          </CardView>
         )}
       </div>
     </div>

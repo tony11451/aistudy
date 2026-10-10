@@ -36,9 +36,10 @@ class AIClient:
     def _headers(self) -> dict:
         return {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
 
-    async def stream_chat(self, messages: list, temperature: float | None = None) -> AsyncIterator[str]:
+    async def stream_chat(self, messages: list, temperature: float | None = None,
+                          model: str = "") -> AsyncIterator[str]:
         payload = {
-            "model": self.chat_model,
+            "model": model or self.chat_model,
             "messages": messages,
             "temperature": self.temperature if temperature is None else temperature,
             "stream": True,

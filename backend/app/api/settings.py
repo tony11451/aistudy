@@ -9,6 +9,8 @@ from ..services.context import resolve_ai_config
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
+DEFAULT_SUBJECTS = ["语文", "数学", "英语", "物理", "化学", "生物", "历史", "地理", "道德与法治"]
+
 
 def _get_row(db: Session) -> AppSettings:
     row = db.query(AppSettings).filter(AppSettings.id == 1).first()
@@ -32,6 +34,7 @@ def _mask(key: str) -> str:
 def get_settings(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     cfg = resolve_ai_config(db, user)
     row = _get_row(db)
+    assign = row.model_assign or {}
     return {
         "effective": {
             "api_base_url": cfg["api_base_url"],
@@ -57,6 +60,13 @@ def get_settings(user: User = Depends(get_current_user), db: Session = Depends(g
             "vision_model": user.vision_model,
             "grade": user.grade,
         },
+        "models": row.models or [],
+        "assign": {
+            "chat": assign.get("chat", row.chat_model),
+            "vision": assign.get("vision", row.vision_model),
+            "analysis": assign.get("analysis", row.chat_model),
+        },
+        "subjects": user.subjects if user.subjects is not None else DEFAULT_SUBJECTS,
     }
 
 
@@ -87,3 +97,28 @@ def update_personal(payload: PersonalSettingsIn, user: User = Depends(get_curren
         user.grade = payload.grade
     db.commit()
     return {"ok": True}
+
+
+@router.put("/models")
+def update_models(payload: dict, _: User = Depends(require_admin),
+                  db: Session = Depends(get_db)):
+    row = _get_row(db)
+    models = [m.strip() for m in (payload.get("models") or []) if m.strip()]
+    row.models = models[:30]
+    assign = payload.get("assign") or {}
+    row.model_assign = {
+        "chat": assign.get("chat", ""),
+        "vision": assign.get("vision", ""),
+        "analysis": assign.get("analysis", ""),
+    }
+    db.commit()
+    return {"ok": True, "models": row.models}
+
+
+@router.put("/subjects")
+def update_subjects(payload: dict, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    subjects = [s.strip() for s in (payload.get("subjects") or []) if s.strip()]
+    user.subjects = subjects[:20]
+    db.commit()
+    return {"ok": True, "subjects": user.subjects}

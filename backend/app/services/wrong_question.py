@@ -7,7 +7,7 @@ from .. import prompts
 from ..models import MethodCard, User, WrongQuestion
 from .ai_client import build_user_content
 from .context import get_vision_client
-from .knowledge import touch_knowledge
+from .knowledge import touch_error
 
 
 def _normalize(item: dict, subject: str, grade: str) -> dict:
@@ -69,6 +69,7 @@ async def analyze_and_save(db: Session, user: User, *, subject: str, grade: str,
             source="batch" if mode == "batch" else ("photo" if image_ids else "text"),
             my_question=my_question,
             images=image_urls if len(items) == 1 else image_urls[:1],
+            original_images=image_urls,
             created_at=datetime.utcnow(),
             **norm,
         )
@@ -78,8 +79,7 @@ async def analyze_and_save(db: Session, user: User, *, subject: str, grade: str,
 
     for wq in saved:
         if wq.knowledge_points:
-            touch_knowledge(db, user, wq.subject, wq.knowledge_points,
-                            unit=wq.unit, mastery="weak", learning_state="learning")
+            touch_error(db, user, wq.subject, wq.knowledge_points, unit=wq.unit)
         if wq.method_specific or wq.method_general:
             db.add(MethodCard(
                 user_id=user.id,

@@ -1,174 +1,199 @@
-"""知识点管理、学习进度、思维导图数据。"""
+"""统一知识点/弱点节点树：CRUD、置信度、布局、进度。"""
+import math
 from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from ..models import KnowledgePoint, User, UserKnowledgeStatus, WrongQuestion
+from ..models import KnowledgeNode, User, WrongQuestion
 
-MINDMAP_MASTERY = {"unknown", "weak", "improving", "mastered"}
-MINDMAP_STATE = {"not_started", "learning", "learned"}
+MASTERY_ORDER = {"unknown": 0, "weak": 1, "improving": 2, "mastered": 3}
+CONFIDENCE_THRESHOLD = 2  # ≥2 题才升级为 confirmed
 
 
-def upsert_knowledge_point(db: Session, subject: str, name: str, unit: str = "") -> KnowledgePoint:
+def get_or_create_node(db: Session, user: User, subject: str, name: str,
+                       parent_id: int | None = None, node_type: str = "knowledge",
+                       source: str = "ai") -> KnowledgeNode:
     name = (name or "").strip()[:64]
     if not name:
-        raise ValueError("知识点名为空")
-    kp = (db.query(KnowledgePoint)
-          .filter(KnowledgePoint.subject == subject, KnowledgePoint.name == name)
-          .first())
-    if not kp:
-        kp = KnowledgePoint(subject=subject, name=name, unit=(unit or "").strip()[:64])
-        db.add(kp)
-        db.flush()
-    elif unit and not kp.unit:
-        kp.unit = unit[:64]
-    return kp
+        raise ValueError("节点名为空")
+    q = db.query(KnowledgeNode).filter(
+        KnowledgeNode.user_id == user.id,
+        KnowledgeNode.subject == subject,
+        KnowledgeNode.name == name,
+    )
+    node = q.first()
+    if node:
+        return node
+    node = KnowledgeNode(
+        user_id=user.id, subject=subject, parent_id=parent_id,
+        name=name, node_type=node_type, source=source,
+    )
+    db.add(node)
+    db.flush()
+    return node
 
 
-def touch_knowledge(db: Session, user: User, subject: str, names: list[str],
-                    unit: str = "", mastery: str = "weak",
-                    learning_state: str = "learning", count: int = 1):
+def touch_error(db: Session, user: User, subject: str, names: list[str],
+                unit: str = "") -> list[KnowledgeNode]:
+    """错题场景：确保节点存在并累计错题数、置信度升级、掌握度标记薄弱。"""
+    touched = []
+    parent = None
+    if unit:
+        parent = get_or_create_node(db, user, subject, unit, None, "knowledge")
     for name in names:
         name = (name or "").strip()
         if not name:
             continue
-        try:
-            kp = upsert_knowledge_point(db, subject, name, unit)
-        except ValueError:
-            continue
-        status = (db.query(UserKnowledgeStatus)
-                  .filter(UserKnowledgeStatus.user_id == user.id,
-                          UserKnowledgeStatus.knowledge_point_id == kp.id)
-                  .first())
-        if not status:
-            status = UserKnowledgeStatus(user_id=user.id, knowledge_point_id=kp.id,
-                                         error_count=0, mastery="unknown",
-                                         learning_state="not_started")
-            db.add(status)
-        status.error_count = (status.error_count or 0) + count
-        status.last_seen = datetime.utcnow()
-        if learning_state in MINDMAP_STATE:
-            if status.learning_state != "learned":
-                status.learning_state = learning_state
-        if mastery in MINDMAP_MASTERY:
-            status.mastery = _upgrade_mastery(status.mastery, mastery)
+        node = get_or_create_node(db, user, subject, name, parent.id if parent else None, "knowledge")
+        node.error_count = (node.error_count or 0) + 1
+        node.updated_at = datetime.utcnow()
+        if node.error_count >= CONFIDENCE_THRESHOLD:
+            node.confidence = "confirmed"
+        node.mastery = "weak"
+        if node.learning_state != "learned":
+            node.learning_state = "learning"
+        touched.append(node)
     db.commit()
+    return touched
 
 
-def _upgrade_mastery(current: str | None, new: str) -> str:
-    current = current or "unknown"
-    order = {"unknown": 0, "weak": 1, "improving": 2, "mastered": 3}
-    # 新出现错题：直接标记薄弱
-    if new == "weak":
-        return "weak"
-    return new if order.get(new, 0) > order.get(current, 0) else current
-
-
-def set_learning_state(db: Session, user: User, items: list[dict]):
-    """根据作业扫描结果更新学习状态。"""
+def set_learning_items(db: Session, user: User, items: list[dict]) -> None:
     for it in items:
         name = (it.get("knowledge_point") or "").strip()
         if not name:
             continue
-        kp = upsert_knowledge_point(db, it.get("subject") or "", name, it.get("unit", ""))
-        if not kp.subject and it.get("subject"):
-            kp.subject = it["subject"]
-        status = (db.query(UserKnowledgeStatus)
-                  .filter(UserKnowledgeStatus.user_id == user.id,
-                          UserKnowledgeStatus.knowledge_point_id == kp.id)
-                  .first())
-        if not status:
-            status = UserKnowledgeStatus(user_id=user.id, knowledge_point_id=kp.id,
-                                         error_count=0, mastery="unknown",
-                                         learning_state="not_started")
-            db.add(status)
+        subject = it.get("subject") or "综合"
+        parent = None
+        if it.get("unit"):
+            parent = get_or_create_node(db, user, subject, it["unit"], None, "knowledge")
+        node = get_or_create_node(db, user, subject, name, parent.id if parent else None)
         state = it.get("learning_state", "learning")
-        if state in MINDMAP_STATE and status.learning_state != "learned":
-            status.learning_state = state
-        status.last_seen = datetime.utcnow()
+        if state in ("learning", "learned") and node.learning_state != "learned":
+            node.learning_state = state
         if it.get("evidence"):
-            status.note = it["evidence"][:200]
+            node.note = str(it["evidence"])[:200]
+        node.updated_at = datetime.utcnow()
     db.commit()
 
 
-def build_mindmap(db: Session, user: User, subject: str) -> dict:
-    """生成思维导图节点与边：学科中心 -> 单元 -> 知识点。"""
-    statuses = (db.query(UserKnowledgeStatus)
-                .join(KnowledgePoint, KnowledgePoint.id == UserKnowledgeStatus.knowledge_point_id)
-                .filter(UserKnowledgeStatus.user_id == user.id)
-                .all())
-    kp_rows = db.query(KnowledgePoint).filter(KnowledgePoint.subject == subject).all()
-    kp_status = {s.knowledge_point_id: s for s in statuses}
-
-    # 错题计数（知识点粒度）
-    error_map: dict[str, int] = {}
-    wqs = (db.query(WrongQuestion)
-           .filter(WrongQuestion.user_id == user.id, WrongQuestion.subject == subject)
-           .all())
-    for w in wqs:
-        for name in (w.knowledge_points or []):
-            error_map[name] = error_map.get(name, 0) + 1
-
-    units: dict[str, list] = {}
-    for kp in kp_rows:
-        st = kp_status.get(kp.id)
-        if not st and kp.name not in error_map:
+def _auto_positions(db: Session, user: User, subject: str) -> None:
+    """为无位置的节点做极坐标自动布局（已定位的保持不变）。"""
+    nodes = (db.query(KnowledgeNode)
+             .filter(KnowledgeNode.user_id == user.id, KnowledgeNode.subject == subject)
+             .all())
+    roots = [n for n in nodes if not n.parent_id]
+    for i, root in enumerate(roots):
+        if root.pos_x is None or root.pos_y is None:
+            root.pos_x = 0
+            root.pos_y = 0
+        children = [n for n in nodes if n.parent_id == root.id]
+        need = [n for n in children if n.pos_x is None or n.pos_y is None]
+        if not need:
             continue
-        unit = kp.unit or "未分类"
-        units.setdefault(unit, []).append((kp, st))
+        n = len(children) or 1
+        radius = 240
+        for j, node in enumerate(need):
+            angle = (2 * math.pi * (i + j / max(len(need), 1)) / max(len(roots), 1)) - math.pi / 2
+            node.pos_x = root.pos_x + radius * math.cos(angle) * (1 + 0.3 * (j % 2))
+            node.pos_y = root.pos_y + radius * math.sin(angle) * (1 + 0.3 * (j % 2))
+    db.commit()
 
-    nodes = [{"id": "root", "label": subject, "kind": "root",
-              "mastery": "unknown", "errorCount": 0, "learningState": "learned",
-              "unit": "", "position": {"x": 0, "y": 0}}]
-    edges = []
-    unit_items = list(units.items())
-    radius_u = 260
-    import math
-    for i, (unit, items) in enumerate(unit_items):
-        angle = (2 * math.pi * i / max(len(unit_items), 1)) - math.pi / 2
-        ux = radius_u * math.cos(angle)
-        uy = radius_u * math.sin(angle)
-        uid = f"u{i}"
-        nodes.append({"id": uid, "label": unit, "kind": "unit", "mastery": "unknown",
-                      "errorCount": 0, "learningState": "learning", "unit": unit,
-                      "position": {"x": ux, "y": uy}})
-        edges.append({"id": f"e-root-{uid}", "source": "root", "target": uid})
-        n = len(items)
-        for j, (kp, st) in enumerate(items):
-            spread = math.pi / max(n, 1) * 0.9
-            base = angle - spread / 2 + (spread * j / max(n - 1, 1) if n > 1 else spread / 2)
-            r = 150 + (j % 2) * 40
-            x = ux + r * math.cos(base)
-            y = uy + r * math.sin(base)
-            err = error_map.get(kp.name, 0)
-            mastery = (st.mastery if st and st.mastery else None) or ("weak" if err else "unknown")
-            nodes.append({
-                "id": f"kp{kp.id}", "label": kp.name, "kind": "kp",
-                "mastery": mastery,
-                "errorCount": max(err, st.error_count if st and st.error_count else 0),
-                "learningState": (st.learning_state if st and st.learning_state else None)
-                                 or ("learning" if err else "not_started"),
-                "unit": unit,
-                "note": st.note if st else "",
-                "position": {"x": x, "y": y},
+
+def build_mindmap(db: Session, user: User, subject: str, kind_filter: str = "") -> dict:
+    _auto_positions(db, user, subject)
+    q = db.query(KnowledgeNode).filter(
+        KnowledgeNode.user_id == user.id, KnowledgeNode.subject == subject)
+    nodes = q.order_by(KnowledgeNode.sort_order, KnowledgeNode.id).all()
+    by_id = {n.id: n for n in nodes}
+
+    def keep(n: KnowledgeNode) -> bool:
+        if not kind_filter or kind_filter == "all":
+            return True
+        return n.node_type == kind_filter
+
+    node_items = [{
+        "id": "root",
+        "label": subject,
+        "kind": "root",
+        "nodeType": "subject",
+        "mastery": "unknown",
+        "confidence": "confirmed",
+        "errorCount": 0,
+        "learningState": "learning",
+        "note": "",
+        "description": "",
+        "source": "ai",
+        "position": {"x": 0, "y": 0},
+        "realId": 0,
+    }]
+    edge_items = []
+    for n in nodes:
+        # 筛选时保留父链，避免孤岛
+        visible = keep(n)
+        if not visible:
+            continue
+        node_items.append({
+            "id": f"n{n.id}",
+            "label": n.name,
+            "kind": "root" if not n.parent_id else ("weakness" if n.node_type == "weakness" else "kp"),
+            "nodeType": n.node_type,
+            "mastery": n.mastery,
+            "confidence": n.confidence,
+            "errorCount": n.error_count or 0,
+            "learningState": n.learning_state,
+            "note": n.note,
+            "description": n.description,
+            "source": n.source,
+            "position": {"x": n.pos_x or 0, "y": n.pos_y or 0},
+            "realId": n.id,
+        })
+        if n.parent_id and f"n{n.parent_id}" != f"n{n.id}":
+            edge_items.append({
+                "id": f"e{n.parent_id}-{n.id}",
+                "source": f"n{n.parent_id}",
+                "target": f"n{n.id}",
             })
-            edges.append({"id": f"e-{uid}-kp{kp.id}", "source": uid, "target": f"kp{kp.id}"})
-    return {"nodes": nodes, "edges": edges}
+    # 顶层节点连到学科中心；父节点被筛掉的子节点同样挂到中心
+    visible_ids = {i["id"] for i in node_items}
+    for n in nodes:
+        if keep(n):
+            has_parent_edge = any(e["target"] == f"n{n.id}" for e in edge_items)
+            if not has_parent_edge:
+                edge_items.append({"id": f"e0-{n.id}", "source": "root", "target": f"n{n.id}"})
+    return {"nodes": node_items, "edges": edge_items, "subject": subject}
 
 
 def progress_summary(db: Session, user: User) -> dict:
-    statuses = (db.query(UserKnowledgeStatus)
-                .join(KnowledgePoint, KnowledgePoint.id == UserKnowledgeStatus.knowledge_point_id)
-                .filter(UserKnowledgeStatus.user_id == user.id)
-                .all())
+    nodes = (db.query(KnowledgeNode)
+             .filter(KnowledgeNode.user_id == user.id)
+             .all())
     by_subject: dict[str, dict] = {}
-    for s in statuses:
-        subj = s.knowledge_point.subject if s.knowledge_point else "其他"
-        d = by_subject.setdefault(subj, {"weak": [], "improving": [], "mastered": [], "unknown": [],
-                                        "learning": 0, "learned": 0, "not_started": 0})
-        d.get(s.mastery, d["unknown"]).append(s.knowledge_point.name if s.knowledge_point else "?")
-        if s.learning_state in d:
-            d[s.learning_state] += 1
-    for subj, d in by_subject.items():
-        d["total"] = len(d["weak"]) + len(d["improving"]) + len(d["mastered"]) + len(d["unknown"])
+    for n in nodes:
+        d = by_subject.setdefault(n.subject, {
+            "weak": [], "improving": [], "mastered": [], "unknown": [],
+            "learning": 0, "learned": 0, "not_started": 0, "total": 0,
+        })
+        d.get(n.mastery, d["unknown"]).append(n.name)
+        d[n.learning_state] = d.get(n.learning_state, 0) + 1
+        d["total"] += 1
     return by_subject
+
+
+def serialize_node(n: KnowledgeNode) -> dict:
+    return {
+        "id": n.id,
+        "subject": n.subject,
+        "parent_id": n.parent_id,
+        "name": n.name,
+        "node_type": n.node_type,
+        "confidence": n.confidence,
+        "mastery": n.mastery,
+        "learning_state": n.learning_state,
+        "error_count": n.error_count,
+        "note": n.note,
+        "description": n.description,
+        "source": n.source,
+        "pos_x": n.pos_x,
+        "pos_y": n.pos_y,
+        "created_at": n.created_at.isoformat() if n.created_at else None,
+    }

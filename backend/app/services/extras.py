@@ -4,11 +4,10 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from .. import prompts
-from ..models import (PracticeGoal, Report, User, UserKnowledgeStatus,
-                      KnowledgePoint, WrongQuestion)
+from ..models import (PracticeGoal, Report, User, KnowledgeNode, WrongQuestion)
 from .ai_client import build_user_content, extract_json
 from .context import get_ai_client, get_vision_client
-from .knowledge import set_learning_state
+from .knowledge import set_learning_items
 from .retrieval import format_progress
 
 
@@ -100,5 +99,5 @@ async def scan_homework(db: Session, user: User, subject: str, grade: str,
     for it in items:
         it.setdefault("subject", subject or "综合")
     if items:
-        set_learning_state(db, user, items)
+        set_learning_items(db, user, items)
     return data if isinstance(data, dict) else {"learning_items": [], "summary": ""}

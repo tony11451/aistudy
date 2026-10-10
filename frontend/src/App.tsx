@@ -1,6 +1,13 @@
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, ToastProvider, useAuth } from './store'
-import { Loading } from './components'
+import { Loading, BottomNav } from './ui'
+import {
+  IconBook,
+  IconChat,
+  IconHome,
+  IconMap,
+  IconUser,
+} from './icons'
 import Setup from './pages/Setup'
 import Register from './pages/Register'
 import Login from './pages/Login'
@@ -15,38 +22,27 @@ import Mine from './pages/Mine'
 import Settings from './pages/Settings'
 
 const NAV = [
-  { path: '/', icon: '🏠', label: '首页' },
-  { path: '/mindmap', icon: '🧠', label: '图谱' },
-  { path: '/wrong', icon: '📝', label: '错题' },
-  { path: '/chat', icon: '💬', label: '对话' },
-  { path: '/mine', icon: '👤', label: '我的' },
+  { path: '/', icon: <IconHome size={22} />, label: '首页' },
+  { path: '/mindmap', icon: <IconMap size={22} />, label: '图谱' },
+  { path: '/wrong', icon: <IconBook size={22} />, label: '错题' },
+  { path: '/chat', icon: <IconChat size={22} />, label: '对话' },
+  { path: '/mine', icon: <IconUser size={22} />, label: '我的' },
 ]
 
-/** 一级 Tab 页才显示底部导航；二级页（聊天室/详情/上传/设置）隐藏，
- *  避免 fixed 导航栏遮挡聊天输入框等底部控件 */
 const TAB_PATHS = ['/', '/mindmap', '/wrong', '/chat', '/mine']
 
-function BottomNav() {
+function AppNav() {
   const { pathname } = useLocation()
   const nav = useNavigate()
-  const isTabPage = TAB_PATHS.includes(pathname)
-  if (!isTabPage) return null
+  if (!TAB_PATHS.includes(pathname)) return null
   return (
-    <nav className="md-bottomnav">
-      {NAV.map((item) => {
-        const active = item.path === pathname
-        return (
-          <button
-            key={item.path}
-            className={`md-navitem ${active ? 'active' : ''}`}
-            onClick={() => nav(item.path)}
-          >
-            <span className="md-navicon">{item.icon}</span>
-            <span>{item.label}</span>
-          </button>
-        )
-      })}
-    </nav>
+    <div className="app-nav">
+      <BottomNav
+        items={NAV.map((n) => ({ value: n.path, label: n.label, icon: n.icon }))}
+        value={pathname}
+        onChange={(v) => nav(v)}
+      />
+    </div>
   )
 }
 
@@ -73,7 +69,7 @@ function Guarded() {
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      <BottomNav />
+      <AppNav />
     </>
   )
 }

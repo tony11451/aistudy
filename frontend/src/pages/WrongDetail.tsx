@@ -1,18 +1,25 @@
+import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
-import { Loading, Markdown, MASTERY_LABEL, TopBar, useAsync } from '../components'
+import { Btn, CardView, Loading, TopBar, Badge, IconBtn } from '../ui'
+import { Markdown, MASTERY_LABEL, masteryTone, useAsync } from '../components'
+import { ImageViewer } from '../viewer'
 import { useToast } from '../store'
+import { IconChat, IconDelete, IconCheck } from '../icons'
 
 export default function WrongDetail() {
   const { id } = useParams()
   const nav = useNavigate()
   const toast = useToast()
-  const { data: w, loading, reload, setData } = useAsync(
+  const [viewImg, setViewImg] = useState<string | null>(null)
+  const { data: w, loading, setData } = useAsync(
     () => api.get<any>(`/api/wrong-questions/${id}`),
     [id],
   )
 
   if (loading || !w) return <Loading />
+
+  const imgSrc = (img: string) => (img.startsWith('/') ? img : `/api/images/${img}`)
 
   const toggleReviewed = async () => {
     const res = await api.put<any>(`/api/wrong-questions/${id}`, {
@@ -35,19 +42,15 @@ export default function WrongDetail() {
       <TopBar
         title="错题详情"
         back={() => nav(-1)}
-        right={
-          <button className="md-iconbtn" onClick={remove} title="删除">
-            🗑
-          </button>
-        }
+        right={<IconBtn icon={<IconDelete size={20} />} onClick={remove} label="删除" />}
       />
 
       <div className="row" style={{ flexWrap: 'wrap', gap: 6, margin: '12px 0' }}>
-        <span className="badge badge-primary">{w.subject}</span>
-        {w.grade && <span className="badge">{w.grade}</span>}
-        {w.unit && <span className="badge">{w.unit}</span>}
-        <span className="badge">{w.difficulty}</span>
-        <span className={`badge badge-${w.mastery}`}>{MASTERY_LABEL[w.mastery] || w.mastery}</span>
+        <Badge tone="primary">{w.subject}</Badge>
+        {w.grade && <Badge>{w.grade}</Badge>}
+        {w.unit && <Badge>{w.unit}</Badge>}
+        <Badge>{w.difficulty}</Badge>
+        <Badge tone={masteryTone(w.mastery)}>{MASTERY_LABEL[w.mastery] || w.mastery}</Badge>
       </div>
 
       {w.knowledge_points?.length > 0 && (
@@ -55,8 +58,11 @@ export default function WrongDetail() {
           {w.knowledge_points.map((k: string) => (
             <button
               key={k}
-              className="md-chip"
-              onClick={() => nav(`/chat?kp=${encodeURIComponent(k)}&subject=${encodeURIComponent(w.subject)}`)}
+              className="badge badge-primary"
+              style={{ border: 'none', cursor: 'pointer', minHeight: 32 }}
+              onClick={() =>
+                nav(`/chat?kp=${encodeURIComponent(k)}&subject=${encodeURIComponent(w.subject)}`)
+              }
             >
               🏷 {k}
             </button>
@@ -67,61 +73,61 @@ export default function WrongDetail() {
       {w.images?.length > 0 && (
         <div className="img-grid" style={{ marginBottom: 12 }}>
           {w.images.map((img: string, i: number) => (
-            <div className="img-cell" key={i} style={{ aspectRatio: '4/3' }}>
-              <img src={img.startsWith('/') ? img : `/api/images/${img}`} alt="" />
+            <div className="img-cell" key={i} style={{ aspectRatio: '4/3' }} onClick={() => setViewImg(imgSrc(img))}>
+              <img src={imgSrc(img)} alt="" />
             </div>
           ))}
         </div>
       )}
 
       {w.question_text && (
-        <div className="md-card md-card-filled">
+        <CardView variant="filled">
           <div className="caption">题目</div>
           <Markdown text={w.question_text} />
-        </div>
+        </CardView>
       )}
 
       {w.my_question && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">我当时的问题</div>
           <div>{w.my_question}</div>
-        </div>
+        </CardView>
       )}
 
       {w.wrong_reason && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">🔍 错因分析</div>
           <Markdown text={w.wrong_reason} />
-        </div>
+        </CardView>
       )}
 
       {w.correct_solution && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">✅ 正确解法</div>
           <Markdown text={w.correct_solution} />
-        </div>
+        </CardView>
       )}
 
       {w.key_points?.length > 0 && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">📌 要点</div>
           <ul style={{ margin: '6px 0', paddingLeft: 20 }}>
             {w.key_points.map((k: string, i: number) => (
               <li key={i}>{k}</li>
             ))}
           </ul>
-        </div>
+        </CardView>
       )}
 
       {w.extensions && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">🔁 举一反三</div>
           <Markdown text={w.extensions} />
-        </div>
+        </CardView>
       )}
 
       {(w.method_specific || w.method_general) && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">🧭 答题方法</div>
           {w.method_specific && (
             <div style={{ marginTop: 6 }}>
@@ -135,27 +141,31 @@ export default function WrongDetail() {
               <Markdown text={w.method_general} />
             </div>
           )}
-        </div>
+        </CardView>
       )}
 
       {w.learning_content && (
-        <div className="md-card" style={{ marginTop: 10 }}>
+        <CardView variant="filled">
           <div className="caption">📖 AI 识别的学习内容</div>
           <div>{w.learning_content}</div>
-        </div>
+        </CardView>
       )}
 
       <div className="col" style={{ marginTop: 16, gap: 10 }}>
-        <button
-          className="md-btn md-btn-filled md-btn-block"
+        <Btn
+          variant="filled"
+          block
+          leadingIcon={<IconChat size={18} />}
           onClick={() => nav(`/chat?wrong=${w.id}&subject=${encodeURIComponent(w.subject)}`)}
         >
-          💬 就这道题继续追问 AI
-        </button>
-        <button className="md-btn md-btn-tonal md-btn-block" onClick={toggleReviewed}>
-          {w.is_reviewed ? '↩ 取消已复习' : '✓ 我已复习这道题'}
-        </button>
+          就这道题继续追问 AI
+        </Btn>
+        <Btn variant="tonal" block leadingIcon={<IconCheck size={18} />} onClick={toggleReviewed}>
+          {w.is_reviewed ? '取消已复习' : '我已复习这道题'}
+        </Btn>
       </div>
+
+      {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
     </div>
   )
 }

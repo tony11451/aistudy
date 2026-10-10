@@ -1,6 +1,8 @@
-import { ReactNode, useEffect, useState } from 'react'
+import { useEffect, useState, ReactNode } from 'react'
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 
-/** 极简 Markdown 渲染（无第三方依赖） */
+/** Markdown + LaTeX 数学公式渲染（$..$ 行内 / $$..$$ 块级） */
 export function Markdown({ text }: { text: string }) {
   const html = renderMarkdown(text || '')
   return <div className="md-content" dangerouslySetInnerHTML={{ __html: html }} />
@@ -14,14 +16,34 @@ function escapeHtml(s: string) {
     .replace(/"/g, '&quot;')
 }
 
+function renderTex(src: string): string {
+  // 块级公式 $$...$$
+  src = src.replace(/\$\$([\s\S]+?)\$\$/g, (_, tex) => {
+    try {
+      return katex.renderToString(tex.trim(), { displayMode: true, throwOnError: false })
+    } catch {
+      return `<code>${escapeHtml(tex)}</code>`
+    }
+  })
+  // 行内公式 $...$
+  src = src.replace(/(^|[^\\$])\$([^$\n]+?)\$/g, (m, pre, tex) => {
+    try {
+      return pre + katex.renderToString(tex.trim(), { displayMode: false, throwOnError: false })
+    } catch {
+      return m
+    }
+  })
+  return src
+}
+
 function renderMarkdown(src: string): string {
   const blocks: string[] = []
-  // 先抽出代码块
   let text = src.replace(/```([\s\S]*?)```/g, (_, code) => {
     blocks.push(`<pre><code>${escapeHtml(code.replace(/^\w*\n/, ''))}</code></pre>`)
     return `\u0000BLOCK${blocks.length - 1}\u0000`
   })
   text = escapeHtml(text)
+  text = renderTex(text)
 
   const lines = text.split('\n')
   const out: string[] = []
@@ -115,128 +137,7 @@ function inline(s: string): string {
     .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
 }
 
-export function Loading({ text = '加载中…' }: { text?: string }) {
-  return (
-    <div className="col" style={{ alignItems: 'center', padding: '40px 0', gap: 14 }}>
-      <div className="md-spinner" />
-      <span className="muted">{text}</span>
-    </div>
-  )
-}
-
-export function Empty({ icon = '🌙', title, desc, action }: {
-  icon?: string
-  title: string
-  desc?: string
-  action?: ReactNode
-}) {
-  return (
-    <div className="col" style={{ alignItems: 'center', padding: '48px 20px', gap: 10 }}>
-      <div style={{ fontSize: 44 }}>{icon}</div>
-      <div className="title-strong">{title}</div>
-      {desc && <div className="muted" style={{ textAlign: 'center' }}>{desc}</div>}
-      {action}
-    </div>
-  )
-}
-
-export function Sheet({ open, onClose, children, title }: {
-  open: boolean
-  onClose: () => void
-  children: ReactNode
-  title?: string
-}) {
-  useEffect(() => {
-    if (open) document.body.style.overflow = 'hidden'
-    else document.body.style.overflow = ''
-    return () => {
-      document.body.style.overflow = ''
-    }
-  }, [open])
-  if (!open) return null
-  return (
-    <div className="md-overlay" onClick={onClose}>
-      <div className="md-sheet" onClick={(e) => e.stopPropagation()}>
-        <div
-          style={{
-            width: 36,
-            height: 4,
-            borderRadius: 2,
-            background: 'var(--md-outline-variant)',
-            margin: '4px auto 14px',
-          }}
-        />
-        {title && <div className="title-strong" style={{ marginBottom: 12 }}>{title}</div>}
-        {children}
-      </div>
-    </div>
-  )
-}
-
-export function Dialog({ open, onClose, title, children }: {
-  open: boolean
-  onClose: () => void
-  title: string
-  children: ReactNode
-}) {
-  if (!open) return null
-  return (
-    <div className="md-overlay" style={{ alignItems: 'center' }} onClick={onClose}>
-      <div className="md-dialog" onClick={(e) => e.stopPropagation()}>
-        <div className="title-strong" style={{ marginBottom: 12 }}>{title}</div>
-        {children}
-      </div>
-    </div>
-  )
-}
-
-export function Chips<T extends string>({ options, value, onChange }: {
-  options: readonly T[]
-  value: T | ''
-  onChange: (v: T | '') => void
-}) {
-  return (
-    <div className="md-chip-row">
-      {options.map((o) => (
-        <button
-          key={o}
-          className={`md-chip ${value === o ? 'active' : ''}`}
-          onClick={() => onChange(value === o ? '' : o)}
-        >
-          {o}
-        </button>
-      ))}
-    </div>
-  )
-}
-
-export function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="md-field">
-      <span className="md-field-label">{label}</span>
-      {children}
-    </label>
-  )
-}
-
-export function TopBar({ title, back, right }: {
-  title: string
-  back?: () => void
-  right?: ReactNode
-}) {
-  return (
-    <div className="md-topbar">
-      {back && (
-        <button className="md-iconbtn" onClick={back} aria-label="返回">
-          ←
-        </button>
-      )}
-      <div className="md-topbar-title">{title}</div>
-      {right}
-    </div>
-  )
-}
-
+/** 异步数据加载 Hook */
 export function useAsync<T>(fn: () => Promise<T>, deps: any[] = []) {
   const [data, setData] = useState<T | null>(null)
   const [loading, setLoading] = useState(true)
@@ -271,3 +172,17 @@ export const STATE_LABEL: Record<string, string> = {
   learning: '学习中',
   learned: '已学完',
 }
+
+export const CONFIDENCE_LABEL: Record<string, string> = {
+  suspected: '疑似',
+  confirmed: '已确认',
+}
+
+export function masteryTone(m?: string): 'weak' | 'improving' | 'mastered' | 'neutral' {
+  if (m === 'weak') return 'weak'
+  if (m === 'improving') return 'improving'
+  if (m === 'mastered') return 'mastered'
+  return 'neutral'
+}
+
+export type { ReactNode }

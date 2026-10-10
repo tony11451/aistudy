@@ -110,6 +110,7 @@ class ConversationCreate(BaseModel):
 class ChatMessageIn(BaseModel):
     content: str
     image_ids: list[int] = Field(default_factory=list)
+    model: str = ""
 
 
 class ProfileIn(BaseModel):

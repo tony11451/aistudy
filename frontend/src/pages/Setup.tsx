@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, setToken } from '../api'
-import { Field } from '../components'
+import { Btn, Field, SelectField } from '../ui'
 import { useAuth, useToast } from '../store'
 import { GRADES } from '../constants'
 
@@ -45,35 +45,13 @@ export default function Setup() {
       </div>
       <div className="section-title">初始化 · 创建管理员</div>
       <form className="col" onSubmit={submit}>
-        <Field label="用户名">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required />
-        </Field>
-        <Field label="密码（至少 6 位）">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </Field>
-        <Field label="确认密码">
-          <input
-            type="password"
-            value={password2}
-            onChange={(e) => setPassword2(e.target.value)}
-            required
-          />
-        </Field>
-        <Field label="年级">
-          <select value={grade} onChange={(e) => setGrade(e.target.value)}>
-            {GRADES.map((g) => (
-              <option key={g}>{g}</option>
-            ))}
-          </select>
-        </Field>
-        <button className="md-btn md-btn-filled md-btn-block" disabled={loading}>
+        <Field label="用户名" value={username} onChange={setUsername} required />
+        <Field label="密码（至少 6 位）" value={password} onChange={setPassword} type="password" required />
+        <Field label="确认密码" value={password2} onChange={setPassword2} type="password" required />
+        <SelectField label="年级" value={grade} options={GRADES} onChange={setGrade} />
+        <Btn variant="filled" block type="submit" disabled={loading}>
           {loading ? '创建中…' : '创建并开始使用'}
-        </button>
+        </Btn>
       </form>
     </div>
   )

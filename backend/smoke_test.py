@@ -76,21 +76,54 @@ check("get_wq", r.json()["question_text"].startswith("解方程"))
 r = c.put(f"/api/wrong-questions/{wid}", headers=H2, json={"is_reviewed": True, "mastery": "improving"})
 check("update_wq", r.json()["is_reviewed"] is True)
 
-# 5. 知识点触达 + 图谱 + 进度
-from app.services.knowledge import touch_knowledge, build_mindmap, progress_summary  # noqa: E402
-from app.models import User  # noqa: E402
+# 5. 节点树 + 图谱 + 进度（统一节点模型）
+from app.services.knowledge import touch_error, build_mindmap, progress_summary  # noqa: E402
+from app.models import User, KnowledgeNode  # noqa: E402
 db = SessionLocal()
 u = db.query(User).filter(User.username == "stu1").first()
-touch_knowledge(db, u, "数学", ["因式分解", "配方法"], unit="一元二次方程")
-touch_knowledge(db, u, "数学", ["不等式"], unit="不等式")
+touch_error(db, u, "数学", ["因式分解", "配方法"], unit="一元二次方程")
+touch_error(db, u, "数学", ["因式分解"])  # 第二次 → confirmed
+touch_error(db, u, "数学", ["不等式"])
 mp = build_mindmap(db, u, "数学")
 db.close()
-check("mindmap_nodes", len(mp["nodes"]) >= 4, str(len(mp["nodes"])))
-check("mindmap_has_kp", any(n["kind"] == "kp" for n in mp["nodes"]))
+check("mindmap_nodes", len(mp["nodes"]) >= 3, str(len(mp["nodes"])))
+check("mindmap_has_kp", any(n["kind"] in ("kp", "weakness") for n in mp["nodes"]))
+check("confidence_upgrade", any(n["confidence"] == "confirmed" and n["label"] == "因式分解"
+                                for n in mp["nodes"]), str(mp["nodes"])[:200])
 r = c.get("/api/knowledge/mindmap?subject=数学", headers=H2)
-check("mindmap_api", r.status_code == 200 and len(r.json()["nodes"]) >= 4)
+check("mindmap_api", r.status_code == 200 and len(r.json()["nodes"]) >= 3)
 r = c.get("/api/knowledge/progress", headers=H2)
 check("progress_api", r.status_code == 200 and "数学" in r.json())
+
+# 5.2 节点 CRUD
+r = c.post("/api/knowledge/nodes", headers=H2,
+           json={"subject": "数学", "name": "函数", "node_type": "knowledge", "description": "测试"})
+check("node_create", r.status_code == 200 and r.json()["id"] > 0, r.text[:200])
+nid = r.json()["id"]
+r = c.post("/api/knowledge/nodes", headers=H2,
+           json={"subject": "数学", "name": "二次函数", "parent_id": nid})
+check("node_child", r.status_code == 200 and r.json()["parent_id"] == nid)
+r = c.put(f"/api/knowledge/nodes/{nid}", headers=H2, json={"name": "函数初步", "mastery": "improving"})
+check("node_update", r.json()["name"] == "函数初步" and r.json()["mastery"] == "improving", r.text[:200])
+r = c.post("/api/knowledge/nodes/apply", headers=H2, json={"proposals": [
+    {"action": "add", "subject": "数学", "name": "数列", "node_type": "knowledge",
+     "confidence": "suspected", "reason": "对话提及", "children": [{"name": "等差数列"}]},
+    {"action": "update", "node_id": nid, "subject": "数学", "name": "函数", "node_type": "knowledge"},
+]})
+check("nodes_apply", r.status_code == 200 and len(r.json()["applied"]) >= 3, r.text[:200])
+r = c.delete(f"/api/knowledge/nodes/{nid}", headers=H2)
+check("node_delete", r.status_code == 200)
+r = c.get("/api/knowledge/nodes?subject=数学", headers=H2)
+check("node_list_after_delete", all(n["name"] != "函数初步" for n in r.json()))
+
+# 5.3 模型与学科设置
+r = c.put("/api/settings/models", headers=H,
+          json={"models": ["model-a", "model-b"], "assign": {"chat": "model-a", "vision": "model-b", "analysis": "model-a"}})
+check("settings_models", r.status_code == 200 and len(r.json()["models"]) == 2, r.text[:200])
+r = c.get("/api/settings", headers=H2)
+check("settings_models_get", "model-a" in r.json()["models"] and r.json()["assign"]["chat"] == "model-a")
+r = c.put("/api/settings/subjects", headers=H2, json={"subjects": ["数学", "语文", "英语"]})
+check("settings_subjects", r.json()["subjects"] == ["数学", "语文", "英语"], r.text[:200])
 
 # 6. 对话创建 + 消息历史（无真实 AI Key，验证 502 路径与错误处理）
 r = c.post("/api/chat/conversations", headers=H2,

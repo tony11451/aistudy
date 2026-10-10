@@ -75,7 +75,7 @@ export const api = {
 /** SSE 流式请求（POST + Bearer），按事件回调 */
 export async function streamChat(
   conversationId: number,
-  body: { content: string; image_ids: number[] },
+  body: { content: string; image_ids: number[]; model?: string },
   handlers: {
     onMeta?: (d: any) => void
     onDelta: (text: string) => void

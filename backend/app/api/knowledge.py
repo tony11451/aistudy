@@ -3,18 +3,228 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import PracticeGoal, Report, User, MethodCard
+from ..models import KnowledgeNode, PracticeGoal, Report, User, MethodCard, WrongQuestion
 from ..schemas import GoalCreate, GoalUpdate, MethodCreate, ScanHomeworkIn
 from ..services import extras as extras_svc
 from ..services import knowledge as knowledge_svc
+from ..services.context import get_ai_client
+from .. import prompts
 
 router = APIRouter(prefix="/api", tags=["knowledge"])
 
 
+# ---------- 图谱 / 节点 ----------
 @router.get("/knowledge/mindmap")
-def mindmap(subject: str = Query("数学"), user: User = Depends(get_current_user),
-            db: Session = Depends(get_db)):
-    return knowledge_svc.build_mindmap(db, user, subject)
+def mindmap(subject: str = Query("数学"), kind: str = Query(""),
+            user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    return knowledge_svc.build_mindmap(db, user, subject, kind)
+
+
+@router.get("/knowledge/nodes")
+def list_nodes(subject: str = Query(""), user: User = Depends(get_current_user),
+               db: Session = Depends(get_db)):
+    q = db.query(KnowledgeNode).filter(KnowledgeNode.user_id == user.id)
+    if subject:
+        q = q.filter(KnowledgeNode.subject == subject)
+    nodes = q.order_by(KnowledgeNode.sort_order, KnowledgeNode.id).all()
+    return [knowledge_svc.serialize_node(n) for n in nodes]
+
+
+@router.post("/knowledge/nodes")
+def create_node(payload: dict, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    name = (payload.get("name") or "").strip()
+    subject = (payload.get("subject") or "").strip()
+    if not name or not subject:
+        raise HTTPException(status_code=400, detail="缺少节点名或学科")
+    node_type = payload.get("node_type", "knowledge")
+    if node_type not in ("knowledge", "weakness"):
+        node_type = "knowledge"
+    parent_id = payload.get("parent_id")
+    if not parent_id and payload.get("parent_name"):
+        parent = knowledge_svc.get_or_create_node(db, user, subject, str(payload["parent_name"]).strip())
+        parent_id = parent.id
+    node = knowledge_svc.get_or_create_node(
+        db, user, subject, name, parent_id, node_type,
+        source=payload.get("source", "manual"))
+    if payload.get("description"):
+        node.description = str(payload["description"])[:2000]
+    if payload.get("confidence") in ("suspected", "confirmed"):
+        node.confidence = payload["confidence"]
+    db.commit()
+    db.refresh(node)
+    return knowledge_svc.serialize_node(node)
+
+
+@router.put("/knowledge/nodes/{node_id}")
+def update_node(node_id: int, payload: dict, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    node = db.query(KnowledgeNode).filter(KnowledgeNode.id == node_id,
+                                          KnowledgeNode.user_id == user.id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    if "name" in payload and payload["name"]:
+        node.name = str(payload["name"]).strip()[:64]
+    if "description" in payload:
+        node.description = str(payload["description"] or "")[:2000]
+    if "note" in payload:
+        node.note = str(payload["note"] or "")[:1000]
+    if "mastery" in payload and payload["mastery"] in ("unknown", "weak", "improving", "mastered"):
+        node.mastery = payload["mastery"]
+    if "confidence" in payload and payload["confidence"] in ("suspected", "confirmed"):
+        node.confidence = payload["confidence"]
+    if "node_type" in payload and payload["node_type"] in ("knowledge", "weakness"):
+        node.node_type = payload["node_type"]
+    if "learning_state" in payload and payload["learning_state"] in ("not_started", "learning", "learned"):
+        node.learning_state = payload["learning_state"]
+    if "pos_x" in payload:
+        node.pos_x = float(payload["pos_x"])
+    if "pos_y" in payload:
+        node.pos_y = float(payload["pos_y"])
+    from datetime import datetime
+    node.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(node)
+    return knowledge_svc.serialize_node(node)
+
+
+@router.post("/knowledge/nodes/positions")
+def save_positions(payload: dict, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    items = payload.get("positions") or []
+    for it in items:
+        node = db.query(KnowledgeNode).filter(KnowledgeNode.id == int(it.get("id", 0)),
+                                              KnowledgeNode.user_id == user.id).first()
+        if node:
+            node.pos_x = float(it.get("x", node.pos_x or 0))
+            node.pos_y = float(it.get("y", node.pos_y or 0))
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/knowledge/nodes/{node_id}")
+def delete_node(node_id: int, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    node = db.query(KnowledgeNode).filter(KnowledgeNode.id == node_id,
+                                          KnowledgeNode.user_id == user.id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+
+    def cascade(rid: int):
+        kids = db.query(KnowledgeNode).filter(KnowledgeNode.parent_id == rid).all()
+        for k in kids:
+            cascade(k.id)
+        db.query(KnowledgeNode).filter(KnowledgeNode.id == rid).delete(synchronize_session=False)
+
+    cascade(node_id)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/knowledge/nodes/apply")
+def apply_proposals(payload: dict, user: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """应用「总结成知识点」产生的节点变更（用户已勾选确认）。"""
+    applied = []
+    for p in payload.get("proposals") or []:
+        action = p.get("action", "add")
+        subject = p.get("subject") or "综合"
+        name = (p.get("name") or "").strip()
+        if not name:
+            continue
+        if action == "delete":
+            if p.get("node_id"):
+                node = db.query(KnowledgeNode).filter(
+                    KnowledgeNode.id == int(p["node_id"]),
+                    KnowledgeNode.user_id == user.id).first()
+                if node:
+                    db.delete(node)
+                    applied.append({"action": "delete", "name": name})
+            continue
+        parent_id = None
+        parent_name = (p.get("parent_name") or "").strip()
+        if parent_name:
+            parent = knowledge_svc.get_or_create_node(db, user, subject, parent_name)
+            parent_id = parent.id
+        node_type = p.get("node_type", "knowledge")
+        if node_type not in ("knowledge", "weakness"):
+            node_type = "knowledge"
+        if action == "update" and p.get("node_id"):
+            node = db.query(KnowledgeNode).filter(
+                KnowledgeNode.id == int(p["node_id"]),
+                KnowledgeNode.user_id == user.id).first()
+            if not node:
+                continue
+            node.name = name
+            node.node_type = node_type
+            if p.get("confidence"):
+                node.confidence = p["confidence"]
+            if p.get("reason"):
+                node.note = str(p["reason"])[:200]
+            applied.append({"action": "update", "id": node.id, "name": name})
+        else:
+            node = knowledge_svc.get_or_create_node(
+                db, user, subject, name, parent_id, node_type, source="chat_summary")
+            if p.get("confidence") in ("suspected", "confirmed"):
+                node.confidence = p["confidence"]
+            if p.get("reason"):
+                node.note = str(p["reason"])[:200]
+            applied.append({"action": "add", "id": node.id, "name": name})
+        for c in (p.get("children") or [])[:3]:
+            cname = (c.get("name") or "").strip()
+            if cname:
+                child = knowledge_svc.get_or_create_node(
+                    db, user, subject, cname, node.id,
+                    c.get("node_type", "knowledge"), source="chat_summary")
+                applied.append({"action": "add", "id": child.id, "name": cname})
+    db.commit()
+    return {"ok": True, "applied": applied}
+
+
+@router.post("/knowledge/nodes/{node_id}/resummarize")
+async def resummarize_node(node_id: int, user: User = Depends(get_current_user),
+                           db: Session = Depends(get_db)):
+    """AI 结合相关错题重新总结该节点。"""
+    node = db.query(KnowledgeNode).filter(KnowledgeNode.id == node_id,
+                                          KnowledgeNode.user_id == user.id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="节点不存在")
+    related = (db.query(WrongQuestion)
+               .filter(WrongQuestion.user_id == user.id, WrongQuestion.subject == node.subject)
+               .order_by(WrongQuestion.created_at.desc()).limit(30).all())
+    rows = [w for w in related if node.name in (w.knowledge_points or [])][:6]
+    ctx = "\n".join(
+        f"- 题目：{(w.question_text or '')[:100]}\n  错因：{(w.wrong_reason or '')[:100]}"
+        for w in rows) or "（暂无相关错题）"
+    client = get_ai_client(db, user)
+    try:
+        data = await client.complete_json([
+            {"role": "system", "content": prompts.resummarize_node_system_prompt(node.subject)},
+            {"role": "user", "content": f"节点：{node.name}\n类型：{node.node_type}\n现有描述：{node.description}\n\n【相关错题】\n{ctx}"},
+        ], temperature=0.3)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 重总结失败：{e}")
+    if isinstance(data, dict):
+        if data.get("name"):
+            node.name = str(data["name"]).strip()[:64]
+        if data.get("node_type") in ("knowledge", "weakness"):
+            node.node_type = data["node_type"]
+        if data.get("confidence") in ("suspected", "confirmed"):
+            node.confidence = data["confidence"]
+        if data.get("description"):
+            node.description = str(data["description"])[:2000]
+        for c in (data.get("children") or [])[:3]:
+            cname = (c.get("name") or "").strip()
+            if cname:
+                knowledge_svc.get_or_create_node(db, user, node.subject, cname, node.id,
+                                                 c.get("node_type", "knowledge"), source="ai")
+        if data.get("reason"):
+            node.note = str(data["reason"])[:200]
+        from datetime import datetime
+        node.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(node)
+    return knowledge_svc.serialize_node(node)
 
 
 @router.get("/knowledge/progress")
@@ -35,6 +245,7 @@ async def scan_homework(payload: ScanHomeworkIn, user: User = Depends(get_curren
     return result
 
 
+# ---------- 学习档案 ----------
 @router.get("/profile")
 def get_profile(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     from ..services.profile import get_all_profiles

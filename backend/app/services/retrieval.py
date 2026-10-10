@@ -1,9 +1,7 @@
 """对话上下文检索：相关历史错题 / 方法卡片 / 进度。"""
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from ..models import (MethodCard, User, UserKnowledgeStatus, KnowledgePoint,
-                      WrongQuestion)
+from ..models import (KnowledgeNode, MethodCard, User, WrongQuestion)
 from .profile import get_all_profiles
 
 
@@ -58,18 +56,16 @@ def format_methods(db: Session, user: User, subject: str = "") -> str:
 
 
 def format_progress(db: Session, user: User) -> str:
-    rows = (db.query(UserKnowledgeStatus)
-            .join(KnowledgePoint, KnowledgePoint.id == UserKnowledgeStatus.knowledge_point_id)
-            .filter(UserKnowledgeStatus.user_id == user.id)
-            .order_by(UserKnowledgeStatus.last_seen.desc())
+    rows = (db.query(KnowledgeNode)
+            .filter(KnowledgeNode.user_id == user.id)
+            .order_by(KnowledgeNode.updated_at.desc())
             .limit(20)
             .all())
     lines = []
     for s in rows:
-        kp = s.knowledge_point
         lines.append(
-            f"- {kp.subject if kp else '?'}/{kp.name if kp else '?'}："
-            f"掌握度={s.mastery}，学习状态={s.learning_state}，错题数={s.error_count}"
+            f"- {s.subject}/{s.name}（{'弱点' if s.node_type == 'weakness' else '知识点'}）："
+            f"掌握度={s.mastery}，置信度={s.confidence}，学习状态={s.learning_state}，错题数={s.error_count}"
         )
     return "\n".join(lines)
 

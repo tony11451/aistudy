@@ -24,6 +24,7 @@ class User(Base):
     api_key: Mapped[str] = mapped_column(String(256), default="")
     chat_model: Mapped[str] = mapped_column(String(128), default="")
     vision_model: Mapped[str] = mapped_column(String(128), default="")
+    subjects: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
 
 class AppSettings(Base):
@@ -36,6 +37,8 @@ class AppSettings(Base):
     vision_model: Mapped[str] = mapped_column(String(128), default="")
     temperature: Mapped[float] = mapped_column(Float, default=0.7)
     system_extra_prompt: Mapped[str] = mapped_column(Text, default="")
+    models: Mapped[list] = mapped_column(JSON, default=list)
+    model_assign: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class WrongQuestion(Base):
@@ -58,6 +61,7 @@ class WrongQuestion(Base):
     learning_content: Mapped[str] = mapped_column(String(128), default="")
     analysis_raw: Mapped[dict] = mapped_column(JSON, default=dict)
     images: Mapped[list] = mapped_column(JSON, default=list)
+    original_images: Mapped[list] = mapped_column(JSON, default=list)
     source: Mapped[str] = mapped_column(String(16), default="photo")  # photo | text | batch
     my_question: Mapped[str] = mapped_column(Text, default="")
     is_reviewed: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -76,29 +80,29 @@ class StudyProfile(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
-class KnowledgePoint(Base):
-    __tablename__ = "knowledge_points"
+class KnowledgeNode(Base):
+    """统一节点树：学科 → 大方向知识点 → 二级子节点 / 弱点（每人一棵树）"""
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    subject: Mapped[str] = mapped_column(String(32), index=True)
-    name: Mapped[str] = mapped_column(String(64), index=True)
-    unit: Mapped[str] = mapped_column(String(64), default="")
-    grade_scope: Mapped[str] = mapped_column(String(32), default="")
-
-
-class UserKnowledgeStatus(Base):
-    __tablename__ = "user_knowledge_status"
+    __tablename__ = "knowledge_nodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
-    knowledge_point_id: Mapped[int] = mapped_column(ForeignKey("knowledge_points.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(32), index=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("knowledge_nodes.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    node_type: Mapped[str] = mapped_column(String(16), default="knowledge")  # knowledge | weakness
+    confidence: Mapped[str] = mapped_column(String(16), default="suspected")  # suspected | confirmed
     mastery: Mapped[str] = mapped_column(String(16), default="unknown")  # unknown|weak|improving|mastered
     learning_state: Mapped[str] = mapped_column(String(16), default="not_started")  # not_started|learning|learned
     error_count: Mapped[int] = mapped_column(Integer, default=0)
-    last_seen: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     note: Mapped[str] = mapped_column(Text, default="")
-
-    knowledge_point: Mapped[KnowledgePoint] = relationship("KnowledgePoint")
+    description: Mapped[str] = mapped_column(Text, default="")
+    source: Mapped[str] = mapped_column(String(16), default="ai")  # ai | manual | chat_summary
+    pos_x: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pos_y: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class Conversation(Base):
@@ -111,6 +115,7 @@ class Conversation(Base):
     grade: Mapped[str] = mapped_column(String(16), default="")
     context_kind: Mapped[str] = mapped_column(String(16), default="")  # "" | knowledge | wrong_question
     context_ref: Mapped[str] = mapped_column(String(64), default="")
+    model_name: Mapped[str] = mapped_column(String(128), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

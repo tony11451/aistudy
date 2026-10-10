@@ -1,13 +1,13 @@
 import io
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from PIL import Image, UnidentifiedImageError
 from sqlalchemy import String, or_
 from sqlalchemy.orm import Session
 
 from ..config import IMAGES_DIR
-from ..database import get_db
+from ..database import SessionLocal, get_db
 from ..deps import get_current_user
 from ..models import User, WrongQuestion
 from ..schemas import AnalyzeIn, WrongQuestionUpdate
@@ -15,6 +15,20 @@ from ..services import profile as profile_svc
 from ..services.wrong_question import analyze_and_save
 
 router = APIRouter(prefix="/api/wrong-questions", tags=["wrong-questions"])
+
+
+def _background_profile_update(user_id: int, subject: str, summary: str) -> None:
+    """档案更新走后台任务，避免阻塞分析响应（修「思考中」卡住问题）。"""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            import asyncio
+            asyncio.run(profile_svc.update_profile_with_analysis(db, user, subject, summary))
+    except Exception:
+        pass
+    finally:
+        db.close()
 
 
 def _serialize(w: WrongQuestion) -> dict:
@@ -34,6 +48,7 @@ def _serialize(w: WrongQuestion) -> dict:
         "method_general": w.method_general,
         "learning_content": w.learning_content,
         "images": w.images or [],
+        "original_images": w.original_images or w.images or [],
         "source": w.source,
         "my_question": w.my_question,
         "is_reviewed": w.is_reviewed,
@@ -67,8 +82,8 @@ def _image_url(user_id: int, image_id: int) -> str:
 
 
 @router.post("/analyze")
-async def analyze(payload: AnalyzeIn, user: User = Depends(get_current_user),
-                  db: Session = Depends(get_db)):
+async def analyze(payload: AnalyzeIn, background: BackgroundTasks,
+                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     try:
         rows = await analyze_and_save(
             db, user,
@@ -83,14 +98,10 @@ async def analyze(payload: AnalyzeIn, user: User = Depends(get_current_user),
         raise HTTPException(status_code=502, detail=f"AI 分析失败：{e}")
     if not rows:
         raise HTTPException(status_code=502, detail="AI 未能识别出有效题目，请换更清晰的图片")
-    # 异步更新学习档案
     summary = "\n".join(
         f"知识点{w.knowledge_points} 错因:{(w.wrong_reason or '')[:150]}" for w in rows
     )
-    try:
-        await profile_svc.update_profile_with_analysis(db, user, rows[0].subject, summary)
-    except Exception:
-        pass
+    background.add_task(_background_profile_update, user.id, rows[0].subject, summary)
     return {"items": [_serialize(w) for w in rows]}
 
 

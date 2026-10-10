@@ -1,7 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, setToken } from '../api'
-import { Field, TopBar } from '../components'
+import { Btn, CardView, Field, SelectField, TopBar } from '../ui'
 import { GRADES } from '../constants'
 import { useAuth, useToast } from '../store'
 
@@ -51,59 +51,36 @@ export default function Register() {
             ['parent', '👪 家长', '了解孩子的学习情况'],
           ] as ['student' | 'parent', string, string][]
         ).map(([key, label, desc]) => (
-          <button
+          <CardView
             key={key}
-            className={`md-card ${identity === key ? 'md-card-filled' : 'md-card-outlined'} md-card-tappable`}
+            variant={identity === key ? 'elevated' : 'outlined'}
+            onClick={() => setIdentity(key)}
             style={{
               flex: 1,
               textAlign: 'center',
-              borderColor: identity === key ? 'var(--md-primary)' : undefined,
-              borderWidth: identity === key ? 2 : 1,
+              outline: identity === key ? '2px solid var(--m3e-sys-color-primary)' : undefined,
             }}
-            onClick={() => setIdentity(key)}
           >
             <div style={{ fontSize: 26 }}>{label.split(' ')[0]}</div>
             <div className="title-strong" style={{ marginTop: 4 }}>{label.split(' ')[1]}</div>
             <div className="caption" style={{ marginTop: 2 }}>{desc}</div>
-          </button>
+          </CardView>
         ))}
       </div>
 
       <form className="col" onSubmit={submit}>
-        <Field label="用户名">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required />
-        </Field>
-        <Field label="密码（至少 6 位）">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </Field>
-        <Field label="确认密码">
-          <input
-            type="password"
-            value={password2}
-            onChange={(e) => setPassword2(e.target.value)}
-            required
-          />
-        </Field>
+        <Field label="用户名" value={username} onChange={setUsername} required />
+        <Field label="密码（至少 6 位）" value={password} onChange={setPassword} type="password" required />
+        <Field label="确认密码" value={password2} onChange={setPassword2} type="password" required />
         {identity === 'student' && (
-          <Field label="年级">
-            <select value={grade} onChange={(e) => setGrade(e.target.value)}>
-              {GRADES.map((g) => (
-                <option key={g}>{g}</option>
-              ))}
-            </select>
-          </Field>
+          <SelectField label="年级" value={grade} options={GRADES} onChange={setGrade} />
         )}
-        <button className="md-btn md-btn-filled md-btn-block" disabled={loading}>
+        <Btn variant="filled" block type="submit" disabled={loading}>
           {loading ? '注册中…' : '注册'}
-        </button>
-        <button type="button" className="md-btn md-btn-text md-btn-block" onClick={() => nav('/login')}>
+        </Btn>
+        <Btn variant="text" block onClick={() => nav('/login')}>
           已有账号？去登录
-        </button>
+        </Btn>
       </form>
     </div>
   )

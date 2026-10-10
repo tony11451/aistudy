@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { Field } from '../components'
+import { Btn, Field } from '../ui'
 import { useAuth, useToast } from '../store'
 
 export default function Login() {
@@ -41,35 +41,18 @@ export default function Login() {
         <p>登录后继续你的高效备考之旅</p>
       </div>
       <form className="col" onSubmit={submit}>
-        <Field label="用户名">
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required />
-        </Field>
-        <Field label="密码">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
-        </Field>
-        <button className="md-btn md-btn-filled md-btn-block" disabled={loading}>
+        <Field label="用户名" value={username} onChange={setUsername} required />
+        <Field label="密码" value={password} onChange={setPassword} type="password" required />
+        <Btn variant="filled" block type="submit" disabled={loading}>
           {loading ? '登录中…' : '登录'}
-        </button>
-        <button
-          type="button"
-          className="md-btn md-btn-outlined md-btn-block"
-          onClick={() => nav('/register')}
-        >
+        </Btn>
+        <Btn variant="outlined" block onClick={() => nav('/register')}>
           注册新账号
-        </button>
+        </Btn>
         {needSetup && (
-          <button
-            type="button"
-            className="md-btn md-btn-text md-btn-block"
-            onClick={() => nav('/setup')}
-          >
+          <Btn variant="text" block onClick={() => nav('/setup')}>
             首次部署？初始化管理员
-          </button>
+          </Btn>
         )}
         <p className="caption" style={{ textAlign: 'center', marginTop: 8 }}>
           本系统部署在局域网内，学生与家长可自由注册

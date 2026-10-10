@@ -2,22 +2,37 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import {
-  Dialog,
+  Btn,
+  CardView,
+  ChipFilter,
+  ChipRow,
+  DialogBox,
   Empty,
+  Field,
   Loading,
-  Markdown,
-  MASTERY_LABEL,
-  STATE_LABEL,
-  useAsync,
-} from '../components'
+  TabsBar,
+  Badge,
+  IconBtn,
+} from '../ui'
+import { Markdown, MASTERY_LABEL, masteryTone, useAsync } from '../components'
 import { SUBJECTS } from '../constants'
 import { useAuth, useToast } from '../store'
+import {
+  IconCheck,
+  IconClose,
+  IconDelete,
+  IconEdit,
+  IconLogout,
+  IconRefresh,
+  IconSettings,
+  IconSparkle,
+  IconTarget,
+} from '../icons'
 
-type Tab = 'profile' | 'progress' | 'methods' | 'goals' | 'reports'
+type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports'
 
 export default function Mine() {
   const nav = useNavigate()
-  const toast = useToast()
   const { user, logout } = useAuth()
   const [tab, setTab] = useState<Tab>('progress')
 
@@ -28,9 +43,9 @@ export default function Mine() {
           style={{
             width: 54,
             height: 54,
-            borderRadius: 'var(--md-shape-lg)',
-            background: 'var(--md-primary)',
-            color: 'var(--md-on-primary)',
+            borderRadius: 18,
+            background: 'var(--m3e-sys-color-primary)',
+            color: 'var(--m3e-sys-color-on-primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -46,40 +61,28 @@ export default function Mine() {
             {user?.grade || '—'} · {user?.identity || (user?.role === 'admin' ? '管理员' : '学生')}
           </div>
         </div>
-        <button className="md-iconbtn" onClick={() => nav('/settings')} title="设置">
-          ⚙️
-        </button>
-        <button
-          className="md-iconbtn"
+        <IconBtn icon={<IconSettings size={20} />} label="设置" onClick={() => nav('/settings')} />
+        <IconBtn
+          icon={<IconLogout size={20} />}
+          label="退出"
           onClick={() => {
             logout()
             nav('/login')
           }}
-          title="退出"
-        >
-          🚪
-        </button>
+        />
       </div>
 
-      <div className="md-tabs" style={{ marginBottom: 14 }}>
-        {(
-          [
-            ['progress', '进度看板'],
-            ['profile', '学习档案'],
-            ['methods', '方法库'],
-            ['goals', '刷题目标'],
-            ['reports', '报告'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            className={`md-tab ${tab === key ? 'active' : ''}`}
-            onClick={() => setTab(key)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <TabsBar<Tab>
+        tabs={[
+          { value: 'progress', label: '进度' },
+          { value: 'profile', label: '档案' },
+          { value: 'methods', label: '方法' },
+          { value: 'goals', label: '目标' },
+          { value: 'reports', label: '报告' },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {tab === 'progress' && <ProgressTab />}
       {tab === 'profile' && <ProfileTab />}
@@ -92,7 +95,7 @@ export default function Mine() {
 
 function ProgressTab() {
   const nav = useNavigate()
-  const { data, loading, reload } = useAsync(
+  const { data, loading } = useAsync(
     () => api.get<Record<string, any>>('/api/knowledge/progress'),
     [],
   )
@@ -101,12 +104,12 @@ function ProgressTab() {
   const totalWeak = entries.reduce((n, [, d]: any) => n + (d.weak?.length || 0), 0)
 
   return (
-    <div className="col">
+    <div className="col" style={{ marginTop: 14 }}>
       <div className="hero" style={{ padding: 18 }}>
         <h2 style={{ fontSize: '1.35rem' }}>学习进度总览</h2>
         <p>
           薄弱知识点 <strong>{totalWeak}</strong> 个 · 覆盖 {entries.length} 个学科。
-          掌握度由 AI 根据错题与对话自动更新。
+          掌握度由 AI 根据错题与对话持续更新。
         </p>
       </div>
       {!entries.length && (
@@ -115,33 +118,30 @@ function ProgressTab() {
           title="还没有进度数据"
           desc="上传作业让 AI 识别你正在学什么，或录入错题开始积累"
           action={
-            <button className="md-btn md-btn-filled" onClick={() => nav('/wrong/new')}>
+            <Btn variant="filled" onClick={() => nav('/wrong/new')}>
               去录入
-            </button>
+            </Btn>
           }
         />
       )}
       {entries.map(([subject, d]: any) => {
         const total = d.total || 1
         return (
-          <div key={subject} className="md-card">
+          <CardView key={subject} variant="filled">
             <div className="row">
               <div className="title-strong">{subject}</div>
               <span className="spacer" />
-              <button
-                className="md-btn md-btn-text md-btn-sm"
-                onClick={() => nav(`/mindmap`)}
-              >
+              <Btn variant="text" sm onClick={() => nav('/mindmap')}>
                 图谱 →
-              </button>
+              </Btn>
             </div>
             <div className="row" style={{ gap: 8, margin: '10px 0', height: 10 }}>
               {(
                 [
-                  ['weak', 'var(--md-mastery-weak)'],
-                  ['improving', 'var(--md-mastery-improving)'],
-                  ['mastered', 'var(--md-mastery-mastered)'],
-                  ['unknown', 'var(--md-mastery-unknown)'],
+                  ['weak', 'var(--m3e-sys-color-error)'],
+                  ['improving', 'var(--m3e-sys-color-tertiary)'],
+                  ['mastered', 'var(--m3e-sys-color-primary)'],
+                  ['unknown', 'var(--m3e-sys-color-outline)'],
                 ] as const
               ).map(([k, color]) =>
                 (d[k]?.length || 0) > 0 ? (
@@ -158,19 +158,19 @@ function ProgressTab() {
               )}
             </div>
             <div className="row-wrap">
-              {['weak', 'improving', 'mastered'].map((k) =>
+              {(['weak', 'improving', 'mastered'] as const).flatMap((k) =>
                 (d[k] || []).slice(0, 4).map((kp: string) => (
-                  <span key={k + kp} className={`badge badge-${k === 'unknown' ? '' : k}`}>
+                  <Badge key={k + kp} tone={masteryTone(k)}>
                     <span className={`mastery-dot mastery-${k}`} />
                     {kp}
-                  </span>
+                  </Badge>
                 )),
               )}
             </div>
             <div className="caption" style={{ marginTop: 8 }}>
               学习中 {d.learning || 0} · 已学完 {d.learned || 0} · 未接触 {d.not_started || 0}
             </div>
-          </div>
+          </CardView>
         )
       })}
     </div>
@@ -206,39 +206,36 @@ function ProfileTab() {
 
   if (loading) return <Loading />
   return (
-    <div className="col">
-      <div className="md-card md-card-filled">
+    <div className="col" style={{ marginTop: 14 }}>
+      <CardView variant="filled">
         <div className="title-strong">🧠 AI 第二大脑</div>
         <p className="muted" style={{ lineHeight: 1.6 }}>
           学习档案记录你的薄弱点、常错类型与学习建议（不含原题），每次错题分析后 AI
           会自动增量更新，对话时 AI 会带着这些记忆了解你。
         </p>
-      </div>
+      </CardView>
       {(data || []).map((p) => (
-        <div key={p.subject} className="md-card">
+        <CardView key={p.subject} variant="filled">
           <div className="row">
             <div className="title-strong">{p.subject}</div>
             <span className="caption">{(p.updated_at || '').slice(0, 10)}</span>
             <span className="spacer" />
-            <button
-              className="md-btn md-btn-tonal md-btn-sm"
-              disabled={busy === p.subject}
-              onClick={() => refreshAI(p.subject)}
-            >
+            <Btn variant="tonal" sm disabled={busy === p.subject} onClick={() => refreshAI(p.subject)}>
               {busy === p.subject ? 'AI 更新中…' : 'AI 更新'}
-            </button>
-            <button
-              className="md-btn md-btn-text md-btn-sm"
+            </Btn>
+            <Btn
+              variant="text"
+              sm
               onClick={() => {
                 setEditSubject(p.subject)
                 setEditText(p.content)
               }}
             >
               编辑
-            </button>
+            </Btn>
           </div>
           <Markdown text={p.content} />
-        </div>
+        </CardView>
       ))}
       {!data?.length && (
         <Empty
@@ -246,42 +243,26 @@ function ProfileTab() {
           title="还没有学习档案"
           desc="录入几道错题后，AI 会自动为你建立档案"
           action={
-            <button
-              className="md-btn md-btn-filled"
+            <Btn
+              variant="filled"
               onClick={() => {
                 setEditSubject(SUBJECTS[1])
                 setEditText('')
               }}
             >
               手动新建档案
-            </button>
+            </Btn>
           }
         />
       )}
-      <Dialog open={!!editSubject} onClose={() => setEditSubject('')} title={`编辑 ${editSubject} 档案`}>
-        <textarea
-          value={editText}
-          onChange={(e) => setEditText(e.target.value)}
-          style={{
-            width: '100%',
-            minHeight: 180,
-            padding: 12,
-            borderRadius: 'var(--md-shape-md)',
-            border: '1.5px solid var(--md-outline-variant)',
-            background: 'var(--md-surface)',
-            outline: 'none',
-          }}
-        />
+      <DialogBox open={!!editSubject} onClose={() => setEditSubject('')} title={`编辑 ${editSubject} 档案`}>
+        <Field label="档案内容" value={editText} onChange={setEditText} multiline rows={8} />
         <div className="row" style={{ marginTop: 14 }}>
-          <button className="md-btn md-btn-text" onClick={() => setEditSubject('')}>
-            取消
-          </button>
+          <Btn variant="text" onClick={() => setEditSubject('')}>取消</Btn>
           <span className="spacer" />
-          <button className="md-btn md-btn-filled" onClick={save}>
-            保存
-          </button>
+          <Btn variant="filled" onClick={save}>保存</Btn>
         </div>
-      </Dialog>
+      </DialogBox>
     </div>
   )
 }
@@ -317,84 +298,53 @@ function MethodsTab() {
   }
 
   return (
-    <div className="col">
-      <div className="md-card md-card-filled">
+    <div className="col" style={{ marginTop: 14 }}>
+      <CardView variant="filled">
         <div className="title-strong">🧭 答题方法库</div>
         <p className="muted" style={{ lineHeight: 1.6 }}>
           AI 结合你的题目总结「具体方法 + 通用方法」（尤其政治、历史、地理等文科主观题），
           错题分析时也会自动积累。
         </p>
-        <textarea
-          value={ask}
-          onChange={(e) => setAsk(e.target.value)}
-          placeholder="粘贴一道文科题，让 AI 总结答题方法…"
-          style={{
-            width: '100%',
-            minHeight: 90,
-            marginTop: 10,
-            padding: 12,
-            borderRadius: 'var(--md-shape-md)',
-            border: '1.5px solid var(--md-outline-variant)',
-            background: 'var(--md-surface)',
-            outline: 'none',
-          }}
-        />
-        <div className="row" style={{ marginTop: 8 }}>
-          <select
-            value={askSubject}
-            onChange={(e) => setAskSubject(e.target.value)}
-            style={{
-              minHeight: 40,
-              padding: '0 12px',
-              borderRadius: 'var(--md-shape-full)',
-              border: '1.5px solid var(--md-outline-variant)',
-              background: 'var(--md-surface)',
-            }}
-          >
-            {SUBJECTS.map((s) => (
-              <option key={s}>{s}</option>
-            ))}
-          </select>
-          <span className="spacer" />
-          <button className="md-btn md-btn-filled md-btn-sm" disabled={busy} onClick={summarize}>
-            {busy ? 'AI 总结中…' : 'AI 总结方法'}
-          </button>
+        <div style={{ marginTop: 10 }}>
+          <Field label="粘贴一道题" value={ask} onChange={setAsk} multiline placeholder="让 AI 总结答题方法…" />
         </div>
-      </div>
+        <div className="row" style={{ marginTop: 8 }}>
+          <div style={{ minWidth: 140 }}>
+            <SelectFieldMini value={askSubject} onChange={setAskSubject} />
+          </div>
+          <span className="spacer" />
+          <Btn variant="filled" sm disabled={busy} onClick={summarize}>
+            {busy ? 'AI 总结中…' : 'AI 总结方法'}
+          </Btn>
+        </div>
+      </CardView>
 
-      <div className="md-chip-row">
+      <ChipRow>
         {SUBJECTS.map((s) => (
-          <button
-            key={s}
-            className={`md-chip ${subject === s ? 'active' : ''}`}
-            onClick={() => setSubject(subject === s ? '' : s)}
-          >
-            {s}
-          </button>
+          <ChipFilter key={s} label={s} selected={subject === s} onClick={() => setSubject(subject === s ? '' : s)} />
         ))}
-      </div>
+      </ChipRow>
 
       {loading && <Loading />}
       {!loading && !data?.length && (
         <Empty icon="🧭" title="方法库还是空的" desc="分析文科错题或手动总结，方法会自动归档到这里" />
       )}
       {(data || []).map((m) => (
-        <div key={m.id} className="md-card">
+        <CardView key={m.id} variant="filled">
           <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            <span className="badge badge-primary">{m.subject}</span>
-            {m.knowledge_point && <span className="badge">{m.knowledge_point}</span>}
-            {m.question_type && <span className="badge">{m.question_type}</span>}
+            <Badge tone="primary">{m.subject}</Badge>
+            {m.knowledge_point && <Badge>{m.knowledge_point}</Badge>}
+            {m.question_type && <Badge>{m.question_type}</Badge>}
             <span className="spacer" />
-            <button
-              className="md-iconbtn"
+            <IconBtn
+              icon={<IconDelete size={17} />}
+              label="删除"
               onClick={async () => {
                 if (!confirm('删除这条方法？')) return
                 await api.del(`/api/methods/${m.id}`)
                 reload()
               }}
-            >
-              ×
-            </button>
+            />
           </div>
           {m.specific_method && (
             <div style={{ marginTop: 8 }}>
@@ -408,9 +358,31 @@ function MethodsTab() {
               <Markdown text={m.general_method} />
             </div>
           )}
-        </div>
+        </CardView>
       ))}
     </div>
+  )
+}
+
+function SelectFieldMini({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      style={{
+        minHeight: 42,
+        width: '100%',
+        padding: '0 12px',
+        borderRadius: 999,
+        border: '1.5px solid var(--m3e-sys-color-outline-variant)',
+        background: 'var(--m3e-sys-color-surface)',
+        font: 'inherit',
+      }}
+    >
+      {SUBJECTS.map((s) => (
+        <option key={s}>{s}</option>
+      ))}
+    </select>
   )
 }
 
@@ -438,48 +410,37 @@ function GoalsTab() {
   }
 
   return (
-    <div className="col">
-      <div className="md-card md-card-filled">
+    <div className="col" style={{ marginTop: 14 }}>
+      <CardView variant="filled">
         <div className="title-strong">🎯 刷题目标</div>
         <p className="muted" style={{ lineHeight: 1.6 }}>
           不做题海战术 —— AI 根据你的弱点给出「专攻哪一类题」的目标方向、题量建议和验收标准。
         </p>
-        <button
-          className="md-btn md-btn-filled md-btn-block"
-          style={{ marginTop: 10 }}
-          disabled={busy}
-          onClick={generate}
-        >
-          {busy ? 'AI 规划中…' : '✨ 让 AI 帮我定目标'}
-        </button>
-      </div>
+        <Btn variant="filled" block style={{ marginTop: 10 }} disabled={busy} onClick={generate}>
+          {busy ? 'AI 规划中…' : '让 AI 帮我定目标'}
+        </Btn>
+      </CardView>
 
-      <div className="md-chip-row">
+      <ChipRow>
         {[
           ['active', '进行中'],
           ['done', '已完成'],
           ['archived', '已归档'],
           ['', '全部'],
         ].map(([v, label]) => (
-          <button
-            key={v}
-            className={`md-chip ${status === v ? 'active' : ''}`}
-            onClick={() => setStatus(v)}
-          >
-            {label}
-          </button>
+          <ChipFilter key={label} label={label} selected={status === v} onClick={() => setStatus(v)} />
         ))}
-      </div>
+      </ChipRow>
 
       {loading && <Loading />}
       {!loading && !data?.length && (
         <Empty icon="🎯" title="还没有刷题目标" desc="点上方按钮，让 AI 按你的弱点规划刷题方向" />
       )}
       {(data || []).map((g) => (
-        <div key={g.id} className="md-card">
+        <CardView key={g.id} variant="filled">
           <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
-            <span className="badge badge-primary">{g.subject}</span>
-            {g.question_type && <span className="badge">🎯 {g.question_type}</span>}
+            <Badge tone="primary">{g.subject}</Badge>
+            {g.question_type && <Badge>🎯 {g.question_type}</Badge>}
             <span className="spacer" />
             {g.due_date && <span className="caption">{g.due_date}</span>}
           </div>
@@ -491,30 +452,32 @@ function GoalsTab() {
           <div className="row" style={{ marginTop: 10, gap: 8 }}>
             {g.status === 'active' && (
               <>
-                <button
-                  className="md-btn md-btn-tonal md-btn-sm"
+                <Btn
+                  variant="tonal"
+                  sm
                   onClick={async () => {
                     await api.put(`/api/goals/${g.id}`, { status: 'done' })
                     toast('已标记完成 🎉')
                     reload()
                   }}
                 >
-                  ✓ 完成
-                </button>
-                <button
-                  className="md-btn md-btn-text md-btn-sm"
+                  完成
+                </Btn>
+                <Btn
+                  variant="text"
+                  sm
                   onClick={async () => {
                     await api.put(`/api/goals/${g.id}`, { status: 'archived' })
                     reload()
                   }}
                 >
                   归档
-                </button>
+                </Btn>
               </>
             )}
-            {g.status === 'done' && <span className="badge badge-mastered">已完成 🎉</span>}
+            {g.status === 'done' && <Badge tone="mastered">已完成 🎉</Badge>}
           </div>
-        </div>
+        </CardView>
       ))}
     </div>
   )
@@ -540,16 +503,16 @@ function ReportsTab() {
   }
 
   return (
-    <div className="col">
-      <button className="md-btn md-btn-filled" disabled={busy} onClick={generate}>
-        {busy ? 'AI 分析中…' : '✨ 生成学习报告'}
-      </button>
+    <div className="col" style={{ marginTop: 14 }}>
+      <Btn variant="filled" disabled={busy} onClick={generate}>
+        {busy ? 'AI 分析中…' : '生成学习报告'}
+      </Btn>
       {loading && <Loading />}
       {!loading && !data?.length && (
         <Empty icon="📊" title="还没有学习报告" desc="点击上方按钮，AI 会分析你的错题与进度生成报告" />
       )}
       {(data || []).map((r) => (
-        <div key={r.id} className="md-card">
+        <CardView key={r.id} variant="filled">
           <div className="row">
             <div className="title-strong" style={{ flex: 1 }}>
               {r.title}
@@ -557,13 +520,10 @@ function ReportsTab() {
             <span className="caption">{(r.created_at || '').slice(0, 10)}</span>
           </div>
           <Markdown text={openId === r.id ? r.content : r.content.slice(0, 160) + '…'} />
-          <button
-            className="md-btn md-btn-text md-btn-sm"
-            onClick={() => setOpenId(openId === r.id ? 0 : r.id)}
-          >
+          <Btn variant="text" sm onClick={() => setOpenId(openId === r.id ? 0 : r.id)}>
             {openId === r.id ? '收起' : '展开全文'}
-          </button>
-        </div>
+          </Btn>
+        </CardView>
       ))}
     </div>
   )
