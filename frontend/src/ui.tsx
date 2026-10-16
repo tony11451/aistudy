@@ -18,7 +18,26 @@ import {
 } from '@language-lit/material3-expressive'
 import type { ReactNode } from 'react'
 import { createContext, useContext, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { IconArrowLeft, IconClose } from './icons'
+
+/* ============================================================
+   导航规则（全局约定，勿随意破坏）：
+   1. 认证页（登录/注册/初始化）成功后一律 replace 跳转，
+      不把认证页残留在历史里，避免返回时掉回登录页。
+   2. 二级页返回按钮用 useGoBack：优先历史后退；
+      无站内历史（直接打开/刷新进来的页面）则回兜底主路径。
+   3. 设置页返回直达主界面（产品预期）。
+   ============================================================ */
+
+export function useGoBack(fallback = '/') {
+  const nav = useNavigate()
+  return () => {
+    const idx = (window.history.state as any)?.idx
+    if (typeof idx === 'number' && idx > 0) nav(-1)
+    else nav(fallback, { replace: true })
+  }
+}
 
 /* ---------- 主题 ---------- */
 type ThemeMode = 'light' | 'dark' | 'system'

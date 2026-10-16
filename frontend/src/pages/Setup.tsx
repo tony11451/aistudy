@@ -29,7 +29,8 @@ export default function Setup() {
       setToken(res.access_token)
       await refresh()
       toast('管理员创建成功')
-      nav('/settings')
+      // replace：初始化页不留在历史里，设置页返回不会退回这里
+      nav('/settings', { replace: true })
     } catch (err: any) {
       toast(err.message || '创建失败')
     } finally {

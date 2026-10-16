@@ -18,7 +18,8 @@ export default function Login() {
       .get<{ need_setup: boolean }>('/api/auth/status')
       .then((r) => setNeedSetup(r.need_setup))
       .catch(() => {})
-    if (user) nav('/')
+    // 兜底：已登录用户误入登录页（如历史返回），直接送回主界面
+    if (user) nav('/', { replace: true })
   }, [user, nav])
 
   const submit = async (e: FormEvent) => {
@@ -26,7 +27,7 @@ export default function Login() {
     setLoading(true)
     try {
       await login(username, password)
-      nav('/')
+      nav('/', { replace: true })
     } catch (err: any) {
       toast(err.message || '登录失败')
     } finally {

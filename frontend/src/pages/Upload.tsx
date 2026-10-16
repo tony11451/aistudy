@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, compressImage } from '../api'
-import { Btn, CardView, Field, SelectField, TopBar, Loading, Badge } from '../ui'
+import { Btn, CardView, Field, SelectField, TopBar, Loading, Badge, useGoBack } from '../ui'
 import { Markdown } from '../components'
 import { CropModal } from '../crop'
 import { ImageViewer } from '../viewer'
@@ -13,6 +13,7 @@ type Mode = 'photo' | 'text' | 'batch' | 'scan'
 
 export default function Upload() {
   const nav = useNavigate()
+  const goBack = useGoBack('/wrong')
   const toast = useToast()
   const camRef = useRef<HTMLInputElement>(null)
   const albumRef = useRef<HTMLInputElement>(null)
@@ -90,7 +91,7 @@ export default function Upload() {
 
   return (
     <div className="page" style={{ paddingTop: 0 }}>
-      <TopBar title="录入错题 / 识别进度" back={() => nav(-1)} />
+      <TopBar title="录入错题 / 识别进度" back={goBack} />
 
       <div className="row" style={{ gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
         {MODES.map((m) => (

@@ -30,8 +30,10 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const resp = await fetch(path, { ...options, headers })
   if (resp.status === 401) {
     setToken('')
+    // 清空凭据后整页重载：让应用状态与路由一起归零，
+    // 由路由守卫统一 replace 到登录页（避免把登录页塞进历史）
     if (!path.includes('/auth/')) {
-      window.location.hash = '#/login'
+      window.location.reload()
     }
     throw new ApiError(401, '登录已过期')
   }

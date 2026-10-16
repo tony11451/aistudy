@@ -31,7 +31,8 @@ export default function Register() {
       setToken(res.access_token)
       await refresh()
       toast('注册成功，欢迎加入！')
-      nav('/')
+      // replace：注册页不留在历史里，返回不会退回登录/注册页
+      nav('/', { replace: true })
     } catch (err: any) {
       toast(err.message || '注册失败')
     } finally {

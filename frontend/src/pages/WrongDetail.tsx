@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
-import { Btn, CardView, Loading, TopBar, Badge, IconBtn } from '../ui'
+import { Btn, CardView, Loading, TopBar, Badge, IconBtn, useGoBack } from '../ui'
 import { Markdown, MASTERY_LABEL, masteryTone, useAsync } from '../components'
 import { ImageViewer } from '../viewer'
 import { useToast } from '../store'
@@ -10,6 +10,7 @@ import { IconChat, IconDelete, IconCheck } from '../icons'
 export default function WrongDetail() {
   const { id } = useParams()
   const nav = useNavigate()
+  const goBack = useGoBack('/wrong')
   const toast = useToast()
   const [viewImg, setViewImg] = useState<string | null>(null)
   const { data: w, loading, setData } = useAsync(
@@ -41,7 +42,7 @@ export default function WrongDetail() {
     <div className="page" style={{ paddingTop: 0 }}>
       <TopBar
         title="错题详情"
-        back={() => nav(-1)}
+        back={goBack}
         right={<IconBtn icon={<IconDelete size={20} />} onClick={remove} label="删除" />}
       />
 

@@ -113,7 +113,7 @@ export default function Settings() {
 
   return (
     <div className="page" style={{ paddingTop: 0 }}>
-      <TopBar title="设置" back={() => nav(-1)} />
+      <TopBar title="设置" back={() => nav('/', { replace: true })} />
 
       <TabsBar<Tab>
         tabs={[
