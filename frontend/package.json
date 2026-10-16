@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:render": "esbuild src/__render_test.tsx --bundle --platform=node --format=cjs --loader:.css=empty --outfile=node_modules/.tmp_render_test.cjs && node node_modules/.tmp_render_test.cjs"
   },
   "dependencies": {
     "@language-lit/material3-expressive": "^1.2.2",

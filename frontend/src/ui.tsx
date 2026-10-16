@@ -38,7 +38,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }
   return (
     <ThemeCtx.Provider value={{ mode, setMode }}>
-      <Material3Provider colorMode={mode} preventColorSchemeFlash>
+      <Material3Provider
+        colorMode={mode}
+        preventColorSchemeFlash
+        className="m3e-app-root"
+        style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}
+      >
         {children}
       </Material3Provider>
     </ThemeCtx.Provider>

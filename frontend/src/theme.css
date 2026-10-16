@@ -1,12 +1,17 @@
 /* 应用配套样式：布局 + 库不覆盖的自定义组件（气泡/图谱节点/图片查看器/裁切）
-   颜色、形状、动效均对接 @language-lit/material3-expressive 的 --m3e-sys-* token */
+   颜色、形状、动效均对接 @language-lit/material3-expressive 的 --m3e-sys-* token
+   （这些变量由库 styles.css 在 [data-m3e-color-mode] 容器上定义） */
 
 :root {
   --app-nav-height: 72px;
-  --app-ease: var(--m3e-sys-motion-emphasized-easing, cubic-bezier(0.2, 0, 0, 1));
-  --app-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --app-ease: var(--m3e-sys-motion-expressive-default-spatial-easing, cubic-bezier(0.2, 0, 0, 1));
+  --app-spring: var(--m3e-sys-motion-expressive-fast-spatial-easing, cubic-bezier(0.34, 1.56, 0.64, 1));
+  --app-duration: var(--m3e-sys-motion-expressive-default-spatial-duration, 320ms);
   --app-font: 'Noto Sans SC', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei',
-    system-ui, sans-serif;
+    'Roboto', system-ui, sans-serif;
+  /* 中文优先字体栈覆盖库的 Roboto 定义（typescale 均引用这两个 token） */
+  --m3e-ref-typeface-brand: var(--app-font);
+  --m3e-ref-typeface-plain: var(--app-font);
 }
 
 * {
@@ -27,6 +32,13 @@ body {
   color: var(--m3e-sys-color-on-surface, #1b1b21);
   overscroll-behavior-y: none;
   -webkit-font-smoothing: antialiased;
+}
+
+/* Provider 根容器：token 作用域内生效，负责整页底色（跟随深浅色） */
+.m3e-app-root {
+  background: var(--m3e-sys-color-surface, #fbf8ff);
+  color: var(--m3e-sys-color-on-surface, #1b1b21);
+  font-family: var(--app-font);
 }
 
 a {
