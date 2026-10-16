@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import auth, chat, knowledge, settings, wrong_questions
+from .api import auth, changes, chat, data, knowledge, providers, settings, wrong_questions
 from .config import IMAGES_DIR
 from .database import Base, engine, SessionLocal
 from .models import AppSettings
@@ -22,6 +22,9 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(settings.router)
+app.include_router(providers.router)
+app.include_router(changes.router)
+app.include_router(data.router)
 app.include_router(wrong_questions.router)
 app.include_router(chat.router)
 app.include_router(knowledge.router)
@@ -34,6 +37,8 @@ def init_db():
         if not db.query(AppSettings).filter(AppSettings.id == 1).first():
             db.add(AppSettings(id=1))
             db.commit()
+        from .services.context import migrate_legacy_models
+        migrate_legacy_models(db)
     finally:
         db.close()
 

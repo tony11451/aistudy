@@ -76,6 +76,23 @@ async def chat_completions(req: Request):
             {"action": "add", "subject": "数学", "parent_name": "", "name": "符号错误",
              "node_type": "weakness", "confidence": "suspected", "reason": "学生两次提到符号问题"},
         ]}, ensure_ascii=False)
+    elif "数据技能调用协议" in system:
+        first_user = next((m.get("content") for m in body["messages"]
+                           if m.get("role") == "user" and isinstance(m.get("content"), str)), "")
+        rounds = sum(1 for m in body["messages"]
+                     if m.get("role") == "user" and isinstance(m.get("content"), str)
+                     and "[技能执行结果]" in m["content"])
+        if "整理弱点" not in first_user:
+            answer = "这是关于「" + text[:20] + "」的详细讲解。第一步…第二步…"
+        elif rounds == 0:
+            answer = json.dumps({"skill": "read_mindmap", "args": {"subject": "数学"}},
+                                ensure_ascii=False)
+        elif rounds == 1:
+            answer = json.dumps({"skill": "update_node", "args": {
+                "subject": "数学", "name": "因式分解", "confidence": "confirmed",
+                "reason": "3 道错题印证"}}, ensure_ascii=False)
+        else:
+            answer = "已整理完成：把「因式分解」升级为已确认（依据 3 道错题）。变更可在变更卡中撤销。"
     else:
         answer = "这是关于「" + text[:20] + "」的详细讲解。第一步…第二步…"
 
@@ -197,17 +214,15 @@ check("method_saved", len(r.json()) >= 1)
 r = c.post("/api/reports/generate", headers=H, json={})
 check("report_generate", r.status_code == 200 and "学习报告" in r.json()["content"], r.text[:200])
 
-# 11. 视觉模型被调用（分析用 vision_model）
-vision_calls = [m for m in CALLS if m.get("model") == "mock-vision"]
-check("vision_model_used", len(vision_calls) >= 2, str(len(vision_calls)))
+# 11. 图片任务跟随当前模型（v4 决策），且视觉请求携带图片
+vision_calls = [m for m in CALLS
+                if any(isinstance(msg.get("content"), list)
+                       and any(p.get("type") == "image_url" for p in msg["content"])
+                       for msg in m["messages"])]
+check("vision_image_payload", len(vision_calls) >= 1, str(len(vision_calls)))
+check("vision_follows_current_model", all(m.get("model") == "mock-chat" for m in vision_calls),
+      str(set(m.get("model") for m in vision_calls)))
 
-# 12. 图片以 base64 进入视觉请求 + 错题记录图片引用
-has_image_url = any(
-    isinstance(m.get("content"), list)
-    and any(p.get("type") == "image_url" for p in m["content"])
-    for call in vision_calls for m in call["messages"]
-)
-check("vision_image_payload", has_image_url)
 r = c.post("/api/wrong-questions/analyze", headers=H, json={
     "subject": "数学", "mode": "single", "text": "看图", "image_ids": [iid]})
 item = r.json()["items"][0]
@@ -247,6 +262,70 @@ check("conv_model_set", r.json()["model_name"] == "mb")
 r = c.post(f"/api/chat/conversations/{conv['id']}/messages", headers=H,
            json={"content": "继续", "image_ids": [], "model": "mb"})
 check("chat_model_override", "event: done" in r.text, r.text[:100])
+
+# 16. 供应商体系（v4）：多供应商共存 + 模型切换
+r = c.post("/api/providers", headers=H, json={
+    "name": "xiaomi-mimo", "base_url": "http://127.0.0.1:8901/v1",
+    "api_key": "sk-mimo", "models": ["mimo-a", "mimo-b"]})
+check("provider_create", r.status_code == 200 and len(r.json()["models"]) == 2, r.text[:200])
+pid = r.json()["id"]
+r = c.post("/api/providers", headers=H, json={
+    "name": "deepseek", "base_url": "http://127.0.0.1:8901/v1",
+    "api_key": "sk-ds", "models": ["deepseek-chat"]})
+pid2 = r.json()["id"]
+r = c.get("/api/providers", headers=H)
+check("providers_list", len(r.json()["providers"]) >= 2, r.text[:200])
+r = c.put("/api/providers/current/model", headers=H, json={"model_ref": f"{pid}::mimo-a"})
+check("current_model_set", r.status_code == 200)
+conv3 = c.post("/api/chat/conversations", headers=H, json={"title": "switch", "subject": "数学"}).json()
+c.post(f"/api/chat/conversations/{conv3['id']}/messages", headers=H,
+       json={"content": "hi", "image_ids": []})
+last_call = [m for m in CALLS if m.get("stream")][-1]
+check("chat_uses_selected_model", last_call.get("model") == "mimo-a", str(last_call.get("model")))
+c.put(f"/api/chat/conversations/{conv3['id']}", headers=H,
+      json={"model_name": f"{pid2}::deepseek-chat"})
+c.post(f"/api/chat/conversations/{conv3['id']}/messages", headers=H,
+       json={"content": "hi2", "image_ids": []})
+last_call = [m for m in CALLS if m.get("stream")][-1]
+check("conv_model_switch", last_call.get("model") == "deepseek-chat", str(last_call.get("model")))
+
+# 17. Skill 调用循环：读技能 → 写技能 → 最终回答
+skill_conv = c.post("/api/chat/conversations", headers=H,
+                    json={"title": "整理弱点", "subject": "数学", "grade": "初三"}).json()
+r = c.post(f"/api/chat/conversations/{skill_conv['id']}/messages", headers=H,
+           json={"content": "帮我整理弱点并升级因式分解", "image_ids": []})
+body = r.text
+check("skill_event", "event: skill" in body, body[:300])
+check("skill_read_round", "read_mindmap" in body)
+check("skill_write_round", "update_node" in body)
+check("change_event", "event: change" in body)
+check("skill_final_text", "已整理完成" in body)
+
+# 18. 变更记录 + 撤销
+r = c.get("/api/changes", headers=H)
+changes = r.json()
+check("change_log", len(changes) >= 1 and bool(changes[0]["description"]), str(changes[:1]))
+cid_change = changes[0]["id"]
+r = c.post(f"/api/changes/{cid_change}/undo", headers=H)
+check("change_undo", r.status_code == 200, r.text[:200])
+r = c.get("/api/changes", headers=H)
+check("undo_marked", any(x["id"] == cid_change and x["undone"] for x in r.json()))
+
+# 19. 导出 / 导入（覆盖式，个人范围）
+exp = c.get("/api/data/export?scope=personal", headers=H)
+check("export_zip", exp.status_code == 200 and exp.content[:2] == b"PK", str(exp.status_code))
+import io as _io
+import zipfile as _zipfile
+z = _zipfile.ZipFile(_io.BytesIO(exp.content))
+check("export_manifest", "manifest.json" in z.namelist() and "data.json" in z.namelist())
+manifest = json.loads(z.read("manifest.json"))
+check("export_version", manifest["version"] == 1 and manifest["kind"] == "personal", str(manifest))
+r = c.post("/api/data/import?scope=personal", headers=H,
+           files={"file": ("backup.zip", exp.content, "application/zip")})
+check("import_ok", r.status_code == 200 and r.json()["ok"], r.text[:300])
+check("import_counts", r.json()["counts"].get("wrong_questions", 0) >= 1, r.text[:300])
+r = c.get("/api/wrong-questions", headers=H)
+check("import_roundtrip", r.json()["total"] >= 1)
 
 failed = [n for n, o in ok if not o]
 print(f"\n=== {len(ok) - len(failed)}/{len(ok)} passed ===")

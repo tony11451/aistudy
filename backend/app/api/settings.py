@@ -5,7 +5,7 @@ from ..database import get_db
 from ..deps import get_current_user, require_admin
 from ..models import AppSettings, User
 from ..schemas import GlobalSettingsIn, PersonalSettingsIn
-from ..services.context import resolve_ai_config
+from ..services.context import current_model_ref, resolve_ai_config
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -41,7 +41,7 @@ def get_settings(user: User = Depends(get_current_user), db: Session = Depends(g
             "chat_model": cfg["chat_model"],
             "vision_model": cfg["vision_model"],
             "temperature": cfg["temperature"],
-            "has_key": bool(cfg["api_key"]),
+            "has_key": bool(cfg.get("has_key")),
         },
         "global": {
             "api_base_url": row.api_base_url,
@@ -66,6 +66,7 @@ def get_settings(user: User = Depends(get_current_user), db: Session = Depends(g
             "vision": assign.get("vision", row.vision_model),
             "analysis": assign.get("analysis", row.chat_model),
         },
+        "current_model_ref": current_model_ref(db, user),
         "subjects": user.subjects if user.subjects is not None else DEFAULT_SUBJECTS,
     }
 

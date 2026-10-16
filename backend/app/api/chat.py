@@ -39,6 +39,7 @@ def _msg_dict(m: Message) -> dict:
         "role": m.role,
         "content": m.content,
         "images": m.images or [],
+        "meta": m.meta or {},
         "created_at": m.created_at.isoformat() if m.created_at else None,
     }
 
@@ -181,7 +182,7 @@ def _build_system(db: Session, user: User, conv: Conversation) -> str:
             kp_name, subject, conv.grade or user.grade,
             retrieval.format_profiles(db, user, subject),
             "\n".join(ctx_lines),
-        )
+        ) + "\n\n" + prompts.skill_protocol_system_prompt()
     subject = conv.subject
     query = ""
     if conv.context_kind == "wrong_question":
@@ -197,7 +198,7 @@ def _build_system(db: Session, user: User, conv: Conversation) -> str:
         retrieval.format_methods(db, user, subject),
         retrieval.format_wrong_context(retrieval.retrieve_wrong_questions(db, user, query, subject)),
         extra,
-    )
+    ) + "\n\n" + prompts.skill_protocol_system_prompt()
 
 
 @router.post("/conversations/{cid}/messages")
@@ -237,22 +238,39 @@ def send_message(cid: int, payload: ChatMessageIn,
 
     async def event_stream():
         collected = []
+        skill_events = []
+        change_ids = []
         try:
-            client = get_ai_client(db, user)
+            client = get_ai_client(db, user, conv.model_name)
             yield _sse("meta", {"conversation_id": cid, "user_message_id": user_msg.id})
-            async for delta in client.stream_chat(messages, model=conv.model_name):
-                collected.append(delta)
-                yield _sse("delta", {"content": delta})
+            from ..services.skill_loop import skill_chat_stream
+            async for kind, payload in skill_chat_stream(
+                    client, db, user, {"conversation_id": cid}, messages):
+                if kind == "delta":
+                    collected.append(payload)
+                    yield _sse("delta", {"content": payload})
+                elif kind == "skill":
+                    skill_events.append(payload)
+                    yield _sse("skill", payload)
+                elif kind == "change":
+                    if payload.get("change_id"):
+                        change_ids.append(payload["change_id"])
+                    yield _sse("change", payload)
+                elif kind == "final":
+                    collected = [payload]
             full = "".join(collected)
-            assistant = Message(conversation_id=cid, role="assistant", content=full)
+            assistant = Message(conversation_id=cid, role="assistant", content=full,
+                                meta={"skills": skill_events, "change_ids": change_ids})
             db.add(assistant)
             db.commit()
             db.refresh(assistant)
-            yield _sse("done", {"message_id": assistant.id})
+            yield _sse("done", {"message_id": assistant.id,
+                                "change_ids": change_ids})
         except Exception as e:
             if collected:
                 assistant = Message(conversation_id=cid, role="assistant",
-                                    content="".join(collected))
+                                    content="".join(collected),
+                                    meta={"skills": skill_events, "change_ids": change_ids})
                 db.add(assistant)
                 db.commit()
             yield _sse("error", {"message": str(e)[:400]})

@@ -74,13 +74,15 @@ export const api = {
   },
 }
 
-/** SSE 流式请求（POST + Bearer），按事件回调 */
+/** SSE 流式请求（POST + Bearer），按事件回调（v4：支持 skill/change 事件） */
 export async function streamChat(
   conversationId: number,
   body: { content: string; image_ids: number[]; model?: string },
   handlers: {
     onMeta?: (d: any) => void
     onDelta: (text: string) => void
+    onSkill?: (d: { name: string; status: string; summary?: string; args?: any }) => void
+    onChange?: (d: { change_id?: number; description: string; reason?: string; action?: string }) => void
     onDone?: (d: any) => void
     onError?: (msg: string) => void
   },
@@ -117,6 +119,8 @@ export async function streamChat(
     } catch {}
     if (eventName === 'delta' && payload) handlers.onDelta(payload.content || '')
     else if (eventName === 'meta') handlers.onMeta?.(payload)
+    else if (eventName === 'skill') handlers.onSkill?.(payload)
+    else if (eventName === 'change') handlers.onChange?.(payload)
     else if (eventName === 'done') handlers.onDone?.(payload)
     else if (eventName === 'error') handlers.onError?.(payload?.message || '未知错误')
     eventName = 'message'
@@ -164,4 +168,34 @@ export async function compressImage(file: File, maxSize = 1600, quality = 0.85):
   } catch {
     return file
   }
+}
+
+/** v4：供应商 / 变更 / 数据迁移 */
+export const providersApi = {
+  list: () => api.get<any>('/api/providers'),
+  create: (body: any) => api.post<any>('/api/providers', body),
+  update: (id: number, body: any) => api.put<any>(`/api/providers/${id}`, body),
+  remove: (id: number) => api.del(`/api/providers/${id}`),
+  setCurrent: (modelRef: string) => api.put('/api/providers/current/model', { model_ref: modelRef }),
+}
+
+export const changesApi = {
+  list: (limit = 50) => api.get<any[]>(`/api/changes?limit=${limit}`),
+  undo: (id: number) => api.post<any>(`/api/changes/${id}/undo`),
+}
+
+export const dataApi = {
+  exportUrl: (scope: 'personal' | 'full') => `/api/data/export?scope=${scope}`,
+  exportDownload: async (scope: 'personal' | 'full') => {
+    const resp = await fetch(dataApi.exportUrl(scope), {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (!resp.ok) throw new Error('导出失败')
+    return resp.blob()
+  },
+  importFile: async (scope: 'personal' | 'full', file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request<any>(`/api/data/import?scope=${scope}`, { method: 'POST', body: fd })
+  },
 }

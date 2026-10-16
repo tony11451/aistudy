@@ -1,13 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
-import { Btn, CardView, ChipFilter, ChipRow, DialogBox, Field, Loading, SelectField, TabsBar, TopBar, IconBtn } from '../ui'
+import { api, dataApi, providersApi } from '../api'
+import {
+  Btn,
+  CardView,
+  ChipFilter,
+  ChipRow,
+  DialogBox,
+  Field,
+  Loading,
+  SelectField,
+  TabsBar,
+  TopBar,
+  Badge,
+} from '../ui'
 import { GRADES, SUBJECTS } from '../constants'
 import { useAuth, useToast } from '../store'
 import { useThemeMode } from '../ui'
 import { IconClose, IconPlus } from '../icons'
 
-type Tab = 'personal' | 'global' | 'users' | 'subjects' | 'models'
+type Tab = 'personal' | 'global' | 'providers' | 'subjects' | 'data' | 'users'
 
 export default function Settings() {
   const nav = useNavigate()
@@ -16,19 +28,24 @@ export default function Settings() {
   const { mode: themeMode, setMode: setThemeMode } = useThemeMode()
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<Tab>(user?.role === 'admin' ? 'global' : 'personal')
+  const [tab, setTab] = useState<Tab>(user?.role === 'admin' ? 'providers' : 'personal')
   const [g, setG] = useState<any>({})
   const [p, setP] = useState<any>({})
   const [users, setUsers] = useState<any[]>([])
   const [showAdd, setShowAdd] = useState(false)
   const [newUser, setNewUser] = useState({ username: '', password: '', grade: '初一', display_name: '' })
-  // 学科管理
   const [subjects, setSubjects] = useState<string[]>([...SUBJECTS])
   const [customSubject, setCustomSubject] = useState('')
-  // 模型管理
-  const [modelList, setModelList] = useState<string[]>([])
-  const [newModel, setNewModel] = useState('')
-  const [assign, setAssign] = useState<any>({ chat: '', vision: '', analysis: '' })
+  // 供应商
+  const [providers, setProviders] = useState<any[]>([])
+  const [currentRef, setCurrentRef] = useState('')
+  const [showProvider, setShowProvider] = useState(false)
+  const [editProvider, setEditProvider] = useState<any>(null)
+  const [provForm, setProvForm] = useState({ name: '', base_url: '', api_key: '', models: '' })
+  // 数据
+  const importRef = useRef<HTMLInputElement>(null)
+  const [importScope, setImportScope] = useState<'personal' | 'full'>('personal')
+  const [busy, setBusy] = useState('')
 
   const load = async () => {
     setLoading(true)
@@ -50,15 +67,10 @@ export default function Settings() {
         vision_model: res.personal?.vision_model || '',
         grade: res.personal?.grade || user?.grade || '初一',
       })
-      setModelList(res.models || [])
-      setAssign(
-        res.assign || {
-          chat: res.global?.chat_model || '',
-          vision: res.global?.vision_model || '',
-          analysis: res.global?.chat_model || '',
-        },
-      )
       setSubjects(res.subjects || [...SUBJECTS])
+      const prov = await providersApi.list()
+      setProviders(prov.providers || [])
+      setCurrentRef(prov.current_model_ref || '')
       if (user?.role === 'admin') {
         setUsers(await api.get<any[]>('/api/auth/users'))
       }
@@ -86,15 +98,53 @@ export default function Settings() {
     load()
   }
 
-  const saveModels = async () => {
-    await api.put('/api/settings/models', { models: modelList, assign })
-    toast('模型配置已保存')
-    load()
-  }
-
   const saveSubjects = async () => {
     await api.put('/api/settings/subjects', { subjects })
     toast('学科列表已保存')
+  }
+
+  const openProvider = (prov?: any) => {
+    setEditProvider(prov || null)
+    setProvForm(
+      prov
+        ? {
+            name: prov.name,
+            base_url: prov.base_url,
+            api_key: '',
+            models: (prov.models || []).join(', '),
+          }
+        : { name: '', base_url: '', api_key: '', models: '' },
+    )
+    setShowProvider(true)
+  }
+
+  const saveProvider = async () => {
+    const models = provForm.models
+      .split(/[,，\s]+/)
+      .map((m) => m.trim())
+      .filter(Boolean)
+    try {
+      if (editProvider) {
+        await providersApi.update(editProvider.id, {
+          name: provForm.name,
+          base_url: provForm.base_url,
+          api_key: provForm.api_key,
+          models,
+        })
+      } else {
+        await providersApi.create({
+          name: provForm.name,
+          base_url: provForm.base_url,
+          api_key: provForm.api_key,
+          models,
+        })
+      }
+      toast('供应商已保存')
+      setShowProvider(false)
+      load()
+    } catch (e: any) {
+      toast(e.message || '保存失败')
+    }
   }
 
   const addUser = async () => {
@@ -109,6 +159,43 @@ export default function Settings() {
     }
   }
 
+  const doExport = async (scope: 'personal' | 'full') => {
+    setBusy(scope)
+    try {
+      const blob = await dataApi.exportDownload(scope)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `backup_${scope}_${new Date().toISOString().slice(0, 10)}.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+      toast('导出完成')
+    } catch (e: any) {
+      toast(e.message || '导出失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const doImport = async (file: File) => {
+    if (
+      !confirm(
+        `导入为「覆盖式」：将清空${importScope === 'full' ? '整机所有' : '你的'}现有数据后恢复备份。确定继续？`,
+      )
+    )
+      return
+    setBusy('import')
+    try {
+      const res = await dataApi.importFile(importScope, file)
+      toast(`导入成功：${JSON.stringify(res.counts)}`)
+      load()
+    } catch (e: any) {
+      toast(e.message || '导入失败')
+    } finally {
+      setBusy('')
+    }
+  }
+
   if (loading) return <Loading />
 
   return (
@@ -117,10 +204,15 @@ export default function Settings() {
 
       <TabsBar<Tab>
         tabs={[
-          ...(user?.role === 'admin' ? [{ value: 'global' as Tab, label: 'AI 接口' }] : []),
+          ...(user?.role === 'admin'
+            ? [
+                { value: 'providers' as Tab, label: '供应商' },
+                { value: 'global' as Tab, label: '旧版配置' },
+              ]
+            : []),
           { value: 'personal' as Tab, label: '个人' },
-          { value: 'models' as Tab, label: '模型' },
           { value: 'subjects' as Tab, label: '学科' },
+          { value: 'data' as Tab, label: '数据' },
           ...(user?.role === 'admin' ? [{ value: 'users' as Tab, label: '用户' }] : []),
         ]}
         value={tab}
@@ -146,27 +238,91 @@ export default function Settings() {
         </div>
       </CardView>
 
+      {/* ===== 供应商（v4 核心） ===== */}
+      {tab === 'providers' && (
+        <div className="col" style={{ marginTop: 12 }}>
+          <CardView variant="filled">
+            <div className="title-strong">供应商与模型</div>
+            <p className="muted" style={{ lineHeight: 1.6 }}>
+              可同时添加多个供应商（如小米 MiMo、DeepSeek），每个供应商下填多个模型名；
+              在对话页顶栏随时切换。图片识别跟随当前选中的模型。
+            </p>
+            <div className="caption" style={{ marginTop: 6 }}>
+              当前模型：{currentRef ? currentRef.replace('::', ' · ') : '未选择'}
+            </div>
+          </CardView>
+
+          <Btn variant="filled" onClick={() => openProvider()} leadingIcon={<IconPlus size={16} />}>
+            添加供应商
+          </Btn>
+
+          {providers.map((prov) => (
+            <CardView key={prov.id} variant="elevated">
+              <div className="row">
+                <div style={{ flex: 1 }}>
+                  <div className="title-strong">
+                    {prov.name}
+                    {currentRef.startsWith(`${prov.id}::`) && (
+                      <Badge tone="primary" >使用中</Badge>
+                    )}
+                  </div>
+                  <div className="caption">{prov.base_url}</div>
+                </div>
+                <Btn variant="text" sm onClick={() => openProvider(prov)}>编辑</Btn>
+                <Btn
+                  variant="text"
+                  sm
+                  onClick={async () => {
+                    if (!confirm(`删除供应商「${prov.name}」？`)) return
+                    await providersApi.remove(prov.id)
+                    load()
+                  }}
+                >
+                  删除
+                </Btn>
+              </div>
+              <ChipRow>
+                {(prov.models || []).map((m: string) => {
+                  const ref = `${prov.id}::${m}`
+                  return (
+                    <ChipFilter
+                      key={ref}
+                      label={m}
+                      selected={currentRef === ref}
+                      onClick={async () => {
+                        await providersApi.setCurrent(ref)
+                        setCurrentRef(ref)
+                        toast(`全局默认模型：${prov.name} · ${m}`)
+                      }}
+                    />
+                  )
+                })}
+              </ChipRow>
+            </CardView>
+          ))}
+        </div>
+      )}
+
+      {/* ===== 旧版全局配置（兼容保留） ===== */}
       {tab === 'global' && (
         <div className="col" style={{ marginTop: 12 }}>
           <CardView variant="filled">
-            <div className="title-strong">OpenAI 兼容接口</div>
+            <div className="title-strong">旧版全局配置（兼容）</div>
             <p className="muted" style={{ lineHeight: 1.6 }}>
-              支持 DeepSeek / Kimi / 通义千问 / 智谱 / OpenRouter 等。填 Base URL（含 /v1）、API Key 和模型名。
+              推荐使用「供应商」管理。此页保留旧式单一接口配置，作为未配置供应商时的兜底。
             </p>
           </CardView>
-          <Field label="Base URL（如 https://api.deepseek.com/v1）" value={g.api_base_url} onChange={(v) => setG({ ...g, api_base_url: v })} placeholder="https://api.openai.com/v1" />
+          <Field label="Base URL" value={g.api_base_url} onChange={(v) => setG({ ...g, api_base_url: v })} />
           <Field
-            label={data?.global?.api_key_masked ? `API Key（已保存：${data.global.api_key_masked}，留空不改）` : 'API Key'}
+            label={data?.global?.api_key_masked ? `API Key（已保存：${data.global.api_key_masked}）` : 'API Key'}
             value={g.api_key}
             onChange={(v) => setG({ ...g, api_key: v })}
             type="password"
-            placeholder="sk-..."
           />
-          <Field label="对话模型" value={g.chat_model} onChange={(v) => setG({ ...g, chat_model: v })} placeholder="deepseek-chat" />
-          <Field label="视觉模型（拍照识别用）" value={g.vision_model} onChange={(v) => setG({ ...g, vision_model: v })} placeholder="glm-4v-plus" />
-          <Field label={`温度：${(g.temperature ?? 0.7).toFixed(2)}`} value={String(g.temperature ?? 0.7)} onChange={(v) => setG({ ...g, temperature: parseFloat(v) || 0.7 })} />
+          <Field label="对话模型" value={g.chat_model} onChange={(v) => setG({ ...g, chat_model: v })} />
+          <Field label="视觉模型" value={g.vision_model} onChange={(v) => setG({ ...g, vision_model: v })} />
           <Field label="全局附加提示词（可选）" value={g.system_extra_prompt} onChange={(v) => setG({ ...g, system_extra_prompt: v })} multiline />
-          <Btn variant="filled" block onClick={saveGlobal}>保存全局配置</Btn>
+          <Btn variant="filled" block onClick={saveGlobal}>保存</Btn>
         </div>
       )}
 
@@ -175,7 +331,7 @@ export default function Settings() {
           <CardView variant="filled">
             <div className="title-strong">个人覆盖配置</div>
             <p className="muted" style={{ lineHeight: 1.6 }}>
-              留空表示使用全局共享配置；填写后只对你自己生效（用自己的 API 额度）。
+              留空表示使用全局供应商配置；填写后只对你自己生效（用自己的 API 额度）。
             </p>
           </CardView>
           <SelectField label="我的年级" value={p.grade} options={GRADES} onChange={(v) => setP({ ...p, grade: v })} />
@@ -187,56 +343,7 @@ export default function Settings() {
             type="password"
           />
           <Field label="对话模型（留空用全局）" value={p.chat_model} onChange={(v) => setP({ ...p, chat_model: v })} />
-          <Field label="视觉模型（留空用全局）" value={p.vision_model} onChange={(v) => setP({ ...p, vision_model: v })} />
           <Btn variant="filled" block onClick={savePersonal}>保存个人配置</Btn>
-        </div>
-      )}
-
-      {tab === 'models' && (
-        <div className="col" style={{ marginTop: 12 }}>
-          <CardView variant="filled">
-            <div className="title-strong">模型管理</div>
-            <p className="muted" style={{ lineHeight: 1.6 }}>
-              添加多个模型名称，然后为不同用途指派；对话页还可以在会话内临时切换。
-            </p>
-          </CardView>
-
-          <div className="row-wrap">
-            {modelList.map((m) => (
-              <span key={m} className="badge badge-primary" style={{ minHeight: 34 }}>
-                {m}
-                <button
-                  style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'inherit', marginLeft: 4 }}
-                  onClick={() => setModelList(modelList.filter((x) => x !== m))}
-                >
-                  <IconClose size={13} />
-                </button>
-              </span>
-            ))}
-          </div>
-          <div className="row" style={{ gap: 8 }}>
-            <div style={{ flex: 1 }}>
-              <Field label="添加模型名" value={newModel} onChange={setNewModel} placeholder="如 kimi-k2-0905-preview" />
-            </div>
-            <Btn
-              variant="tonal"
-              onClick={() => {
-                const name = newModel.trim()
-                if (name && !modelList.includes(name)) setModelList([...modelList, name])
-                setNewModel('')
-              }}
-            >
-              <IconPlus size={16} /> 添加
-            </Btn>
-          </div>
-
-          <div className="divider" />
-          <div className="title-strong">用途指派</div>
-          <SelectField label="对话 / 日常问答" value={assign.chat} options={['', ...modelList]} onChange={(v) => setAssign({ ...assign, chat: v })} />
-          <SelectField label="识图 / 错题分析" value={assign.vision} options={['', ...modelList]} onChange={(v) => setAssign({ ...assign, vision: v })} />
-          <SelectField label="总结 / 报告" value={assign.analysis} options={['', ...modelList]} onChange={(v) => setAssign({ ...assign, analysis: v })} />
-
-          <Btn variant="filled" block onClick={saveModels}>保存模型配置</Btn>
         </div>
       )}
 
@@ -281,6 +388,54 @@ export default function Settings() {
         </div>
       )}
 
+      {/* ===== 数据：导出 / 导入（v4） ===== */}
+      {tab === 'data' && (
+        <div className="col" style={{ marginTop: 12 }}>
+          <CardView variant="filled">
+            <div className="title-strong">数据导出 / 导入</div>
+            <p className="muted" style={{ lineHeight: 1.6 }}>
+              备份为 ZIP（含错题、图谱、档案、对话、目标、方法、报告与图片），
+              可用于迁移服务器。导入为<b>覆盖式</b>——先清空对应范围再恢复。
+            </p>
+          </CardView>
+
+          <Btn variant="filled" block disabled={busy === 'personal'} onClick={() => doExport('personal')}>
+            {busy === 'personal' ? '导出中…' : '导出我的数据（个人）'}
+          </Btn>
+          {user?.role === 'admin' && (
+            <Btn variant="tonal" block disabled={busy === 'full'} onClick={() => doExport('full')}>
+              {busy === 'full' ? '导出中…' : '导出整机数据（全部用户+设置）'}
+            </Btn>
+          )}
+
+          <div className="divider" />
+          <div className="title-strong">导入备份（覆盖式）</div>
+          {user?.role === 'admin' && (
+            <ChipRow>
+              <ChipFilter label="恢复到我的账号" selected={importScope === 'personal'}
+                          onClick={() => setImportScope('personal')} />
+              <ChipFilter label="恢复整机（全部用户）" selected={importScope === 'full'}
+                          onClick={() => setImportScope('full')} />
+            </ChipRow>
+          )}
+          <input
+            ref={importRef}
+            type="file"
+            accept=".zip"
+            hidden
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              if (f) doImport(f)
+              e.target.value = ''
+            }}
+          />
+          <Btn variant="outlined" block disabled={busy === 'import'}
+               onClick={() => importRef.current?.click()}>
+            {busy === 'import' ? '导入中…' : '选择备份 ZIP 导入'}
+          </Btn>
+        </div>
+      )}
+
       {tab === 'users' && (
         <div className="col" style={{ marginTop: 12 }}>
           <Btn variant="filled" onClick={() => setShowAdd(true)}>
@@ -292,8 +447,8 @@ export default function Settings() {
                 <div style={{ flex: 1 }}>
                   <div className="title-strong">
                     {u.display_name || u.username}
-                    {u.role === 'admin' && <Badge>管理员</Badge>}
-                    {!u.is_active && <Badge>已停用</Badge>}
+                    {u.role === 'admin' && <Badge tone="primary">管理员</Badge>}
+                    {!u.is_active && <Badge tone="weak">已停用</Badge>}
                   </div>
                   <div className="caption">
                     {u.username} · {u.grade || '—'}
@@ -328,6 +483,37 @@ export default function Settings() {
         </div>
       )}
 
+      {/* 供应商编辑对话框 */}
+      <DialogBox
+        open={showProvider}
+        onClose={() => setShowProvider(false)}
+        title={editProvider ? '编辑供应商' : '添加供应商'}
+      >
+        <div className="col">
+          <Field label="名称（如 小米MiMo / DeepSeek）" value={provForm.name}
+                 onChange={(v) => setProvForm({ ...provForm, name: v })} />
+          <Field label="Base URL（含 /v1）" value={provForm.base_url}
+                 onChange={(v) => setProvForm({ ...provForm, base_url: v })}
+                 placeholder="https://api.example.com/v1" />
+          <Field
+            label={editProvider?.has_key ? `API Key（已保存：${editProvider.api_key_masked}，留空不改）` : 'API Key'}
+            value={provForm.api_key}
+            onChange={(v) => setProvForm({ ...provForm, api_key: v })}
+            type="password"
+          />
+          <Field label="模型名（逗号/空格分隔）" value={provForm.models}
+                 onChange={(v) => setProvForm({ ...provForm, models: v })}
+                 placeholder="mimo-a, mimo-b" />
+          <div className="row">
+            <Btn variant="text" onClick={() => setShowProvider(false)}>
+              <IconClose size={16} /> 取消
+            </Btn>
+            <span className="spacer" />
+            <Btn variant="filled" onClick={saveProvider}>保存</Btn>
+          </div>
+        </div>
+      </DialogBox>
+
       <DialogBox open={showAdd} onClose={() => setShowAdd(false)} title="创建用户">
         <div className="col">
           <Field label="用户名" value={newUser.username} onChange={(v) => setNewUser({ ...newUser, username: v })} />
@@ -342,13 +528,5 @@ export default function Settings() {
         </div>
       </DialogBox>
     </div>
-  )
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="badge badge-primary" style={{ marginLeft: 8 }}>
-      {children}
-    </span>
   )
 }

@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api, compressImage, streamChat } from '../api'
+import { api, compressImage, providersApi, changesApi, streamChat } from '../api'
 import { Btn, CardView, ChipFilter, ChipRow, Loading, Sheet, TopBar, Badge, IconBtn } from '../ui'
 import { Markdown } from '../components'
 import { ImageViewer } from '../viewer'
@@ -15,7 +15,6 @@ import {
   IconSparkle,
   IconTarget,
   IconLightbulb,
-  IconImage,
 } from '../icons'
 
 interface Msg {
@@ -24,18 +23,54 @@ interface Msg {
   content: string
   images?: number[]
   streaming?: boolean
+  meta?: { skills?: any[]; change_ids?: number[] }
 }
 
-interface NodeProposal {
-  action: 'add' | 'update' | 'delete'
-  node_id?: number
-  subject: string
-  parent_name: string
-  name: string
-  node_type: 'knowledge' | 'weakness'
-  reason: string
-  children?: { name: string; node_type: 'knowledge' | 'weakness' }[]
+interface ChangeCard {
+  change_id?: number
+  description: string
+  reason?: string
+  action?: string
+  undone?: boolean
 }
+
+const SKILL_BUTTONS = [
+  {
+    key: 'organize',
+    icon: <IconSparkle size={15} />,
+    label: '整理弱点',
+    prompt:
+      '请帮我整理知识图谱中的弱点：先用 read_mindmap 读取图谱，然后用 reorganize_weaknesses 精简——合并重复的、把拿不准的降级为疑似、删除确实无关的，并说明每一步理由。',
+  },
+  {
+    key: 'reeval',
+    icon: <IconTarget size={15} />,
+    label: '按错题重评',
+    prompt:
+      '请根据我的历史错题重新评估弱点：先用 read_wrong_questions 看最近的错题，再用 re_evaluate 或 update_node 更新相关节点的置信度和掌握度，说明依据。',
+  },
+  {
+    key: 'summarize',
+    icon: <IconCheck size={15} />,
+    label: '总结成知识点',
+    prompt:
+      '请把本次对话的内容沉淀为知识图谱节点：用 create_node 创建知识点（大方向命名，必要时带二级子方向），确实体现薄弱的创建为 weakness，并说明每个节点的依据。',
+  },
+  {
+    key: 'goal',
+    icon: <IconTarget size={15} />,
+    label: '生成刷题目标',
+    prompt:
+      '请根据我的弱点用 create_goal 制定 2-3 个刷题目标（专攻题型、做法、验收标准），并解释为什么这样定。',
+  },
+  {
+    key: 'method',
+    icon: <IconLightbulb size={15} />,
+    label: '总结答题方法',
+    prompt:
+      '请总结这轮对话涉及的答题方法，区分「具体方法」和「通用方法」，并用 save_method 保存到方法库。',
+  },
+]
 
 export default function ChatRoom() {
   const { id } = useParams()
@@ -50,25 +85,21 @@ export default function ChatRoom() {
   const [busy, setBusy] = useState(false)
   const [initing, setIniting] = useState(!!(params.get('kp') || params.get('wrong')))
   const [aiReady, setAiReady] = useState(true)
-  const [models, setModels] = useState<string[]>([])
-  const [model, setModel] = useState('')
+  const [liveSkills, setLiveSkills] = useState<any[]>([])
+  const [liveChanges, setLiveChanges] = useState<ChangeCard[]>([])
+  const [modelRef, setModelRef] = useState('')
+  const [providers, setProviders] = useState<any[]>([])
   const [showModel, setShowModel] = useState(false)
-  const [proposals, setProposals] = useState<NodeProposal[] | null>(null)
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const [summarizing, setSummarizing] = useState(false)
   const [viewImg, setViewImg] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    api
-      .get<any>('/api/settings')
-      .then((s) => {
+    Promise.all([api.get<any>('/api/settings'), providersApi.list().catch(() => null)])
+      .then(([s, p]) => {
         setAiReady(!!s?.effective?.has_key && !!s?.effective?.chat_model)
-        const list: string[] = s?.models || []
-        setModels(list.filter(Boolean))
-        const eff = s?.effective?.chat_model || ''
-        setModel((s as any)?.conversation_model || eff)
+        if (p?.providers) setProviders(p.providers)
+        setModelRef((s as any)?.current_model_ref || p?.current_model_ref || '')
       })
       .catch(() => {})
   }, [])
@@ -80,7 +111,7 @@ export default function ChatRoom() {
           const res = await api.get<any>(`/api/chat/conversations/${id}`)
           setConv(res.conversation)
           setMessages(res.messages)
-          if (res.conversation?.model_name) setModel(res.conversation.model_name)
+          if (res.conversation?.model_name) setModelRef(res.conversation.model_name)
           setIniting(false)
           return
         }
@@ -118,9 +149,9 @@ export default function ChatRoom() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, liveSkills, liveChanges])
 
-  const send = async (e?: FormEvent | string, overrideModel?: string) => {
+  const send = async (e?: FormEvent | string) => {
     if (typeof e === 'object' && e?.preventDefault) e.preventDefault()
     const override = typeof e === 'string' ? e : ''
     const content = (override || input).trim()
@@ -130,6 +161,8 @@ export default function ChatRoom() {
     setInput('')
     setImages([])
     setBusy(true)
+    setLiveSkills([])
+    setLiveChanges([])
     let image_ids: number[] = []
     if (files.length) {
       try {
@@ -145,41 +178,55 @@ export default function ChatRoom() {
       { role: 'user', content, images: image_ids },
       { role: 'assistant', content: '', streaming: true },
     ])
-    const handlers = {
-      onDelta: (t: string) =>
-        setMessages((m) => {
-          const copy = [...m]
-          const last = copy[copy.length - 1]
-          copy[copy.length - 1] = { ...last, content: last.content + t }
-          return copy
-        }),
-      onDone: () => {
-        setMessages((m) => {
-          const copy = [...m]
-          copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false }
-          return copy
-        })
-        setBusy(false)
-      },
-      onError: (msg: string) => {
-        toast(msg)
-        setMessages((m) => {
-          const copy = [...m]
-          const last = copy[copy.length - 1]
-          copy[copy.length - 1] = {
-            ...last,
-            streaming: false,
-            content: last.content || `⚠️ ${msg}`,
-          }
-          return copy
-        })
-        setBusy(false)
-      },
+    const finish = () => {
+      setMessages((m) => {
+        const copy = [...m]
+        copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false }
+        return copy
+      })
+      setBusy(false)
+    }
+    const onError = (msg: string) => {
+      toast(msg)
+      setMessages((m) => {
+        const copy = [...m]
+        const last = copy[copy.length - 1]
+        copy[copy.length - 1] = {
+          ...last,
+          streaming: false,
+          content: last.content || `⚠️ ${msg}`,
+        }
+        return copy
+      })
+      setBusy(false)
     }
     try {
-      await streamChat(conv.id, { content, image_ids, model: overrideModel || model }, handlers)
+      await streamChat(conv.id, { content, image_ids, model: modelRef }, {
+        onDelta: (t) =>
+          setMessages((m) => {
+            const copy = [...m]
+            const last = copy[copy.length - 1]
+            copy[copy.length - 1] = { ...last, content: last.content + t }
+            return copy
+          }),
+        onSkill: (s) =>
+          setLiveSkills((prev) => {
+            const idx = prev.findIndex((x) => x.name === s.name && x.status === 'start')
+            if (s.status === 'done' || s.status === 'error') {
+              if (idx >= 0) {
+                const copy = [...prev]
+                copy[idx] = { ...copy[idx], ...s }
+                return copy
+              }
+            }
+            return [...prev, s]
+          }),
+        onChange: (c) => setLiveChanges((prev) => [...prev, c]),
+        onDone: finish,
+        onError,
+      })
     } catch (err: any) {
-      handlers.onError(err?.message || '网络异常，请重试')
+      onError(err?.message || '网络异常，请重试')
     }
   }
 
@@ -190,13 +237,15 @@ export default function ChatRoom() {
     if (!userMsg) return
     setMessages(before.slice(0, before.lastIndexOf(userMsg)))
     setBusy(true)
+    setLiveSkills([])
+    setLiveChanges([])
     setMessages((m) => [...m, { role: 'assistant', content: '', streaming: true }])
     const onError = (msg: string) => {
       toast(msg)
       setBusy(false)
     }
     try {
-      await streamChat(conv.id, { content: userMsg.content, image_ids: userMsg.images || [], model }, {
+      await streamChat(conv.id, { content: userMsg.content, image_ids: userMsg.images || [], model: modelRef }, {
         onDelta: (t) =>
           setMessages((m) => {
             const copy = [...m]
@@ -228,36 +277,23 @@ export default function ChatRoom() {
     }
   }
 
-  const summarizeToNodes = async () => {
-    setSummarizing(true)
+  const undoChange = async (changeId?: number) => {
+    if (!changeId) return
     try {
-      const res = await api.post<{ proposals: NodeProposal[] }>(
-        `/api/chat/conversations/${conv.id}/summarize`,
-        {},
+      await changesApi.undo(changeId)
+      toast('已撤销该变更')
+      setLiveChanges((prev) =>
+        prev.map((c) => (c.change_id === changeId ? { ...c, undone: true } : c)),
       )
-      const list = res.proposals || []
-      if (!list.length) {
-        toast('本次对话暂无可沉淀的知识点')
-      } else {
-        setProposals(list)
-        setSelected(new Set(list.map((_, i) => i)))
-      }
     } catch (e: any) {
-      toast(e.message || '总结失败')
-    } finally {
-      setSummarizing(false)
+      toast(e.message || '撤销失败')
     }
   }
 
-  const applyProposals = async () => {
-    const chosen = (proposals || []).filter((_, i) => selected.has(i))
-    try {
-      await api.post('/api/knowledge/nodes/apply', { proposals: chosen })
-      toast(`已添加 ${chosen.length} 个知识点到图谱`)
-      setProposals(null)
-    } catch (e: any) {
-      toast(e.message || '保存失败')
-    }
+  const modelNameOf = (ref: string) => {
+    const [pid, model] = ref.split('::')
+    const p = providers.find((x) => String(x.id) === pid)
+    return model ? `${p?.name || '?'} · ${model}` : ref
   }
 
   const quickAsks = [
@@ -280,59 +316,30 @@ export default function ChatRoom() {
         title={conv?.title || (initing ? '创建对话…' : 'AI 对话')}
         back={() => nav('/chat')}
         right={
-          <div className="row" style={{ gap: 6 }}>
-            {conv && (
-              <Badge tone="primary">
-                {conv.context_kind === 'knowledge' ? `🧠 ${conv.context_ref}` : conv.subject || '综合'}
-              </Badge>
-            )}
-            {models.length > 1 && (
-              <Btn variant="text" sm onClick={() => setShowModel(true)}>
-                {model ? model.slice(0, 10) : '模型'}
-              </Btn>
-            )}
-          </div>
+          <Btn variant="text" sm onClick={() => setShowModel(true)}>
+            {modelRef ? modelNameOf(modelRef).slice(0, 12) : '模型'}
+          </Btn>
         }
       />
 
-      {/* 顶部常用操作条 */}
-      {messages.filter((m) => m.role === 'assistant' && m.content).length > 0 && (
-        <div className="row" style={{ gap: 8, padding: '8px 12px', overflowX: 'auto', flexWrap: 'nowrap' }}>
-          <Btn variant="tonal" sm onClick={summarizeToNodes} disabled={summarizing} leadingIcon={<IconSparkle size={15} />}>
-            {summarizing ? '总结中…' : '总结成知识点'}
+      {/* 技能按钮（预置指令 → AI 自由调用技能） */}
+      <div className="row" style={{ gap: 8, padding: '8px 12px', overflowX: 'auto', flexWrap: 'nowrap' }}>
+        {SKILL_BUTTONS.map((b) => (
+          <Btn key={b.key} variant="tonal" sm leadingIcon={b.icon} disabled={busy || !conv}
+               onClick={() => send(b.prompt)}>
+            {b.label}
           </Btn>
-          <Btn
-            variant="outlined"
-            sm
-            leadingIcon={<IconTarget size={15} />}
-            onClick={async () => {
-              await api.post('/api/goals/generate', { subject: conv?.subject || '' })
-              toast('已生成刷题目标，去「我的」查看')
-            }}
-          >
-            生成刷题目标
-          </Btn>
-          <Btn
-            variant="outlined"
-            sm
-            leadingIcon={<IconLightbulb size={15} />}
-            onClick={() => send('请总结这轮对话涉及的答题方法，区分具体方法和通用方法')}
-          >
-            总结答题方法
-          </Btn>
-        </div>
-      )}
+        ))}
+      </div>
 
       <div className="col" style={{ flex: 1, overflowY: 'auto', padding: '14px 14px 20px', gap: 12 }}>
         {!aiReady && !initing && (
           <CardView variant="elevated" style={{ background: 'var(--m3e-sys-color-tertiary-container)' }}>
             <div className="title-strong">⚠️ AI 接口未配置</div>
             <p style={{ margin: '6px 0 10px', lineHeight: 1.5 }}>
-              还没有填写 API Key / 模型，AI 无法回答问题。请先到设置里配置。
+              还没有可用模型，请先到设置里添加供应商与模型。
             </p>
-            <Btn variant="filled" sm onClick={() => nav('/settings')}>
-              去配置 API
-            </Btn>
+            <Btn variant="filled" sm onClick={() => nav('/settings')}>去配置</Btn>
           </CardView>
         )}
         {initing && <Loading text="AI 正在准备…" />}
@@ -341,9 +348,8 @@ export default function ChatRoom() {
             <div className="hero" style={{ padding: 18 }}>
               <h2 style={{ fontSize: '1.35rem' }}>嗨，我是你的学习导师 👋</h2>
               <p style={{ marginTop: 6 }}>
-                {conv?.context_kind === 'knowledge'
-                  ? `我们就「${conv.context_ref}」这个知识点展开聊聊吧，可以直接问我概念、题型和易错点。`
-                  : '我知道你的学习进度和弱点，可以问我任何学习问题。'}
+                我能读取你的图谱、错题和档案来回答问题，也能帮你整理弱点、重评掌握度——
+                所有修改都会显示变更卡，可随时撤销。
               </p>
             </div>
             <div className="caption">试试这些（点击直接提问）：</div>
@@ -392,6 +398,45 @@ export default function ChatRoom() {
             )}
           </div>
         ))}
+
+        {/* 实时技能执行条 */}
+        {liveSkills.length > 0 && (
+          <div className="col" style={{ gap: 6 }}>
+            {liveSkills.map((s, i) => (
+              <div key={i} className="badge" style={{ minHeight: 34 }}>
+                {s.status === 'start' ? '🔧' : s.status === 'error' ? '⚠️' : '✓'}
+                <span>
+                  {s.status === 'start' ? `执行 ${s.name}…` : s.summary || `${s.name} ${s.status}`}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 变更卡（AI 改了什么，可撤销） */}
+        {liveChanges.length > 0 && (
+          <div className="col" style={{ gap: 8 }}>
+            {liveChanges.map((c, i) => (
+              <CardView key={i} variant="elevated"
+                        style={{ borderLeft: '4px solid var(--m3e-sys-color-primary)' }}>
+                <div className="row" style={{ gap: 8 }}>
+                  <Badge tone="primary">AI 变更</Badge>
+                  <span className="caption">{c.action}</span>
+                  <span className="spacer" />
+                  {!c.undone && c.change_id ? (
+                    <button className="bubble-action-btn" onClick={() => undoChange(c.change_id)}>
+                      撤销
+                    </button>
+                  ) : (
+                    <span className="caption">{c.undone ? '已撤销' : ''}</span>
+                  )}
+                </div>
+                <div style={{ marginTop: 6, lineHeight: 1.5 }}>{c.description}</div>
+                {c.reason && <div className="caption" style={{ marginTop: 4 }}>💡 {c.reason}</div>}
+              </CardView>
+            ))}
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
@@ -445,7 +490,7 @@ export default function ChatRoom() {
                 send()
               }
             }}
-            placeholder="问学习问题…（支持 Markdown 与 $公式$）"
+            placeholder="问学习问题…（AI 可读取图谱/错题）"
             rows={1}
             style={{
               flex: 1,
@@ -466,71 +511,34 @@ export default function ChatRoom() {
         </div>
       </form>
 
-      {/* 模型切换 */}
-      <Sheet open={showModel} onClose={() => setShowModel(false)} title="选择模型（本会话）">
-        <ChipRow>
-          {models.map((mname) => (
-            <ChipFilter
-              key={mname}
-              label={mname}
-              selected={model === mname}
-              onClick={() => {
-                setModel(mname)
-                setShowModel(false)
-                api.put(`/api/chat/conversations/${conv.id}`, { model_name: mname }).catch(() => {})
-                toast(`已切换到 ${mname}`)
-              }}
-            />
-          ))}
-        </ChipRow>
+      {/* 模型切换（按供应商分组） */}
+      <Sheet open={showModel} onClose={() => setShowModel(false)} title="选择模型">
+        {providers.map((p) => (
+          <div key={p.id} style={{ marginBottom: 10 }}>
+            <div className="caption" style={{ margin: '4px 2px' }}>{p.name}</div>
+            <ChipRow>
+              {(p.models || []).map((mname: string) => {
+                const ref = `${p.id}::${mname}`
+                return (
+                  <ChipFilter
+                    key={ref}
+                    label={mname}
+                    selected={modelRef === ref}
+                    onClick={() => {
+                      setModelRef(ref)
+                      setShowModel(false)
+                      if (conv) api.put(`/api/chat/conversations/${conv.id}`, { model_name: ref }).catch(() => {})
+                      toast(`已切换到 ${p.name} · ${mname}`)
+                    }}
+                  />
+                )
+              })}
+            </ChipRow>
+          </div>
+        ))}
         <p className="caption" style={{ marginTop: 8 }}>
-          仅影响当前对话；全局默认模型在「设置 → 模型管理」中配置。
+          仅影响当前对话；全局默认模型在「设置 → 供应商」中修改。
         </p>
-      </Sheet>
-
-      {/* 总结入库确认 */}
-      <Sheet open={!!proposals} onClose={() => setProposals(null)} title="沉淀到知识图谱">
-        <p className="caption" style={{ marginBottom: 10 }}>
-          AI 从本次对话总结出以下知识点/弱点，勾选后加入对应学科图谱：
-        </p>
-        <div className="col">
-          {(proposals || []).map((p, i) => (
-            <CardView key={i} variant={selected.has(i) ? 'elevated' : 'outlined'} onClick={() => {
-              const next = new Set(selected)
-              next.has(i) ? next.delete(i) : next.add(i)
-              setSelected(next)
-            }}>
-              <div className="row" style={{ gap: 8 }}>
-                {selected.has(i) ? <IconCheck size={18} /> : <span style={{ width: 18 }} />}
-                <Badge tone="primary">{p.subject}</Badge>
-                <Badge tone={p.node_type === 'weakness' ? 'weak' : 'neutral'}>
-                  {p.node_type === 'weakness' ? '弱点' : '知识点'}
-                </Badge>
-                <span className="spacer" />
-                <span className="caption">{p.action === 'update' ? '更新' : p.action === 'delete' ? '删除' : '新增'}</span>
-              </div>
-              <div className="title-strong" style={{ margin: '8px 0 2px' }}>
-                {p.parent_name ? `${p.parent_name} → ` : ''}
-                {p.name}
-              </div>
-              {p.children && p.children.length > 0 && (
-                <div className="caption">
-                  二级：{p.children.map((c) => c.name).join('、')}
-                </div>
-              )}
-              <div className="caption" style={{ marginTop: 4 }}>{p.reason}</div>
-            </CardView>
-          ))}
-        </div>
-        <div className="row" style={{ marginTop: 14, gap: 10 }}>
-          <Btn variant="text" onClick={() => setProposals(null)}>
-            <IconClose size={16} /> 取消
-          </Btn>
-          <span className="spacer" />
-          <Btn variant="filled" onClick={applyProposals}>
-            <IconCheck size={16} /> 添加选中（{selected.size}）
-          </Btn>
-        </div>
       </Sheet>
 
       {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}

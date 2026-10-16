@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
+import { api, changesApi } from '../api'
 import {
   Btn,
   CardView,
@@ -29,7 +29,7 @@ import {
   IconTarget,
 } from '../icons'
 
-type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports'
+type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports' | 'changes'
 
 export default function Mine() {
   const nav = useNavigate()
@@ -79,6 +79,7 @@ export default function Mine() {
           { value: 'methods', label: '方法' },
           { value: 'goals', label: '目标' },
           { value: 'reports', label: '报告' },
+          { value: 'changes', label: '变更' },
         ]}
         value={tab}
         onChange={setTab}
@@ -89,6 +90,7 @@ export default function Mine() {
       {tab === 'methods' && <MethodsTab />}
       {tab === 'goals' && <GoalsTab />}
       {tab === 'reports' && <ReportsTab />}
+      {tab === 'changes' && <ChangesTab />}
     </div>
   )
 }
@@ -523,6 +525,58 @@ function ReportsTab() {
           <Btn variant="text" sm onClick={() => setOpenId(openId === r.id ? 0 : r.id)}>
             {openId === r.id ? '收起' : '展开全文'}
           </Btn>
+        </CardView>
+      ))}
+    </div>
+  )
+}
+
+function ChangesTab() {
+  const toast = useToast()
+  const { data, loading, reload } = useAsync(() => changesApi.list(80), [])
+
+  const undo = async (id: number) => {
+    try {
+      await changesApi.undo(id)
+      toast('已撤销')
+      reload()
+    } catch (e: any) {
+      toast(e.message || '撤销失败')
+    }
+  }
+
+  return (
+    <div className="col" style={{ marginTop: 14 }}>
+      <CardView variant="filled">
+        <div className="title-strong">🗂 AI 变更记录</div>
+        <p className="muted" style={{ lineHeight: 1.6 }}>
+          AI 通过技能对你的图谱/档案/目标做过的每一次修改都记录在这里（含原因），可随时撤销。
+        </p>
+      </CardView>
+      {loading && <Loading />}
+      {!loading && !(data || []).length && (
+        <Empty icon="🗂" title="还没有变更" desc="让 AI 整理弱点或总结知识点后，变更会出现在这里" />
+      )}
+      {(data || []).map((c: any) => (
+        <CardView key={c.id} variant="filled"
+                  style={{ borderLeft: `4px solid ${c.undone ? 'var(--m3e-sys-color-outline)' : 'var(--m3e-sys-color-primary)'}` }}>
+          <div className="row" style={{ gap: 8 }}>
+            <Badge tone={c.undone ? 'neutral' : 'primary'}>{c.action}</Badge>
+            <span className="caption">{c.target_type} · {c.skill}</span>
+            <span className="spacer" />
+            <span className="caption">{(c.created_at || '').slice(0, 16).replace('T', ' ')}</span>
+          </div>
+          <div style={{ margin: '8px 0 4px', lineHeight: 1.5, textDecoration: c.undone ? 'line-through' : 'none' }}>
+            {c.description}
+          </div>
+          {c.reason && <div className="caption">💡 {c.reason}</div>}
+          {!c.undone && (
+            <div className="row" style={{ marginTop: 8 }}>
+              <span className="spacer" />
+              <Btn variant="outlined" sm onClick={() => undo(c.id)}>撤销此变更</Btn>
+            </div>
+          )}
+          {c.undone && <div className="caption" style={{ marginTop: 6 }}>已撤销</div>}
         </CardView>
       ))}
     </div>

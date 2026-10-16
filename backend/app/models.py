@@ -39,6 +39,43 @@ class AppSettings(Base):
     system_extra_prompt: Mapped[str] = mapped_column(Text, default="")
     models: Mapped[list] = mapped_column(JSON, default=list)
     model_assign: Mapped[dict] = mapped_column(JSON, default=dict)
+    current_provider_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    current_model: Mapped[str] = mapped_column(String(128), default="")
+
+
+class AIProvider(Base):
+    """AI 供应商：base_url + api_key + 模型列表（如 小米MiMo/DeepSeek）"""
+
+    __tablename__ = "ai_providers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64))
+    base_url: Mapped[str] = mapped_column(String(256))
+    api_key: Mapped[str] = mapped_column(String(256), default="")
+    models: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ChangeLog(Base):
+    """AI 写技能变更日志：before/after 快照，支持撤销"""
+
+    __tablename__ = "change_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    skill: Mapped[str] = mapped_column(String(64), default="")
+    action: Mapped[str] = mapped_column(String(32), default="")  # create|update|delete
+    target_type: Mapped[str] = mapped_column(String(32), default="")  # node|profile|goal|method
+    target_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    after: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    undone: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class WrongQuestion(Base):
