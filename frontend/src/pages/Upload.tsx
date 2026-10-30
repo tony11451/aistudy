@@ -5,16 +5,16 @@ import { Btn, CardView, Field, SelectField, TopBar, Loading, Badge, useGoBack } 
 import { Markdown } from '../components'
 import { CropModal } from '../crop'
 import { ImageViewer } from '../viewer'
-import { SUBJECTS } from '../constants'
-import { useToast } from '../store'
+import { useToast, useSubjects } from '../store'
 import { IconCamera, IconImage, IconCrop, IconTarget, IconSparkle } from '../icons'
 
-type Mode = 'photo' | 'text' | 'batch' | 'scan'
+type Mode = 'photo' | 'text' | 'batch'
 
 export default function Upload() {
   const nav = useNavigate()
   const goBack = useGoBack('/wrong')
   const toast = useToast()
+  const subjects = useSubjects()
   const camRef = useRef<HTMLInputElement>(null)
   const albumRef = useRef<HTMLInputElement>(null)
   const [mode, setMode] = useState<Mode>('photo')
@@ -27,17 +27,16 @@ export default function Upload() {
   const [busy, setBusy] = useState(false)
   const [stage, setStage] = useState('')
   const [results, setResults] = useState<any[]>([])
-  const [scanResult, setScanResult] = useState<any>(null)
 
   const afterPick = async (files: FileList | null, croppable: boolean) => {
     if (!files?.length) return
     const f = files[0]
-    if (croppable && mode !== 'scan') {
+    if (croppable) {
       setCropFile(f)
       return
     }
-    const arr = await Promise.all(Array.from(files).slice(0, 6).map((x) => compressImage(x)))
-    setImages((prev) => [...prev, ...arr].slice(0, 6))
+    const arr = await Promise.all(Array.from(files).slice(0, 12).map((x) => compressImage(x)))
+    setImages((prev) => [...prev, ...arr].slice(0, 12))
   }
 
   const analyze = async () => {
@@ -65,33 +64,15 @@ export default function Upload() {
     }
   }
 
-  const scan = async () => {
-    if (!images.length) return toast('请先选择作业照片')
-    setBusy(true)
-    try {
-      setStage('AI 识别学习内容…')
-      const image_ids = await api.upload(images)
-      const res = await api.post<any>('/api/knowledge/scan-homework', { subject, image_ids })
-      setScanResult(res)
-      toast('已识别学习进度')
-    } catch (e: any) {
-      toast(e.message || '识别失败')
-    } finally {
-      setBusy(false)
-      setStage('')
-    }
-  }
-
-  const MODES: { key: Mode; label: string; icon: React.ReactNode }[] = [
+const MODES: { key: Mode; label: string; icon: React.ReactNode }[] = [
     { key: 'photo', label: '拍单题', icon: <IconCamera size={15} /> },
     { key: 'batch', label: '整页多题', icon: <IconImage size={15} /> },
     { key: 'text', label: '手动输入', icon: <IconSparkle size={15} /> },
-    { key: 'scan', label: '识别进度', icon: <IconTarget size={15} /> },
   ]
 
   return (
     <div className="page" style={{ paddingTop: 0 }}>
-      <TopBar title="录入错题 / 识别进度" back={goBack} />
+      <TopBar title="录入错题" back={goBack} />
 
       <div className="row" style={{ gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
         {MODES.map((m) => (
@@ -103,8 +84,7 @@ export default function Upload() {
             onClick={() => {
               setMode(m.key)
               setResults([])
-              setScanResult(null)
-            }}
+                          }}
           >
             {m.label}
           </Btn>
@@ -112,7 +92,7 @@ export default function Upload() {
       </div>
 
       <div className="col">
-        <SelectField label="学科" value={subject} options={SUBJECTS} onChange={setSubject} />
+        <SelectField label="学科" value={subject} options={['自动识别', ...subjects]} onChange={setSubject} />
 
         {mode !== 'text' && (
           <>
@@ -160,8 +140,7 @@ export default function Upload() {
           </>
         )}
 
-        {mode !== 'scan' && (
-          <>
+        <>
             <Field
               label={mode === 'text' ? '题目内容（可含你的做错过程）' : '补充说明（可选）'}
               value={text}
@@ -177,50 +156,16 @@ export default function Upload() {
               rows={2}
               placeholder="例如：为什么这里要配方？我一直不懂"
             />
-          </>
-        )}
+        </>
 
-        {mode === 'scan' && (
-          <CardView variant="filled">
-            <div className="title-strong">🔭 AI 识别我正在学什么</div>
-            <p className="muted" style={{ lineHeight: 1.6 }}>
-              上传近期作业/试卷照片，AI 会识别你正在学习的内容并更新学习进度 ——
-              即使课时顺序和教材不一样（比如化学先学了后面的单元）也能识别。
-            </p>
-          </CardView>
-        )}
-
-        {mode === 'scan' ? (
-          <Btn variant="filled" block disabled={busy} onClick={scan}>
-            {busy ? stage || 'AI 识别中…' : '识别学习进度'}
-          </Btn>
-        ) : (
-          <Btn variant="filled" block disabled={busy} onClick={analyze}>
+        <Btn variant="filled" block disabled={busy} onClick={analyze}>
             {busy ? stage || 'AI 分析中…' : mode === 'batch' ? '批量识别并分析' : 'AI 分析这道错题'}
-          </Btn>
-        )}
+        </Btn>
 
         {busy && (
           <div className="row" style={{ justifyContent: 'center', padding: 10 }}>
             <Loading text={stage || '处理中…'} />
           </div>
-        )}
-
-        {scanResult && (
-          <CardView variant="filled">
-            <div className="title-strong">📖 识别结果</div>
-            <p style={{ lineHeight: 1.6 }}>{scanResult.summary}</p>
-            {(scanResult.learning_items || []).map((it: any, i: number) => (
-              <div key={i} className="row" style={{ marginTop: 6 }}>
-                <Badge tone="primary">{it.knowledge_point}</Badge>
-                <Badge>{it.learning_state === 'learned' ? '已学完' : '学习中'}</Badge>
-                <span className="caption clamp-2" style={{ flex: 1 }}>{it.evidence}</span>
-              </div>
-            ))}
-            <Btn variant="tonal" block style={{ marginTop: 12 }} onClick={() => nav('/mindmap')}>
-              查看图谱更新
-            </Btn>
-          </CardView>
         )}
 
         {results.map((r, i) => (

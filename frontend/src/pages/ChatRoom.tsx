@@ -4,7 +4,7 @@ import { api, compressImage, providersApi, changesApi, streamChat } from '../api
 import { Btn, CardView, ChipFilter, ChipRow, Loading, Sheet, TopBar, Badge, IconBtn } from '../ui'
 import { Markdown } from '../components'
 import { ImageViewer } from '../viewer'
-import { useAuth, useToast } from '../store'
+import { useAuth, useToast, notifyChatReady, clearChatReady } from '../store'
 import {
   IconCamera,
   IconCheck,
@@ -23,7 +23,7 @@ interface Msg {
   content: string
   images?: number[]
   streaming?: boolean
-  meta?: { skills?: any[]; change_ids?: number[] }
+  meta?: { skills?: any[]; change_ids?: number[]; changes?: any[] }
 }
 
 interface ChangeCard {
@@ -93,6 +93,15 @@ export default function ChatRoom() {
   const [viewImg, setViewImg] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    clearChatReady()
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     Promise.all([api.get<any>('/api/settings'), providersApi.list().catch(() => null)])
@@ -179,6 +188,10 @@ export default function ChatRoom() {
       { role: 'assistant', content: '', streaming: true },
     ])
     const finish = () => {
+      if (!mountedRef.current) {
+        notifyChatReady()
+        return
+      }
       setMessages((m) => {
         const copy = [...m]
         copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false }
@@ -187,6 +200,10 @@ export default function ChatRoom() {
       setBusy(false)
     }
     const onError = (msg: string) => {
+      if (!mountedRef.current) {
+        notifyChatReady()
+        return
+      }
       toast(msg)
       setMessages((m) => {
         const copy = [...m]
@@ -241,6 +258,10 @@ export default function ChatRoom() {
     setLiveChanges([])
     setMessages((m) => [...m, { role: 'assistant', content: '', streaming: true }])
     const onError = (msg: string) => {
+      if (!mountedRef.current) {
+        notifyChatReady()
+        return
+      }
       toast(msg)
       setBusy(false)
     }
@@ -254,6 +275,10 @@ export default function ChatRoom() {
             return copy
           }),
         onDone: () => {
+          if (!mountedRef.current) {
+            notifyChatReady()
+            return
+          }
           setMessages((m) => {
             const copy = [...m]
             copy[copy.length - 1] = { ...copy[copy.length - 1], streaming: false }
@@ -386,6 +411,39 @@ export default function ChatRoom() {
               m.content
             )}
             {m.streaming && m.content && <span className="stream-caret" />}
+            {/* 历史消息里的技能执行记录（需求 3） */}
+            {m.role === 'assistant' && !m.streaming && (m.meta?.skills || []).length > 0 && (
+              <div className="col" style={{ gap: 4, marginTop: 8 }}>
+                {(m.meta?.skills || []).map((s: any, j: number) => (
+                  <div key={j} className="badge" style={{ minHeight: 30 }}>
+                    {s.status === 'start' ? '🔧' : s.status === 'error' ? '⚠️' : '✓'}
+                    <span>{s.summary || `${s.name} ${s.status}`}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {/* 历史消息里的变更卡（需求 3/4） */}
+            {m.role === 'assistant' && !m.streaming && (m.meta?.changes || []).length > 0 && (
+              <div className="col" style={{ gap: 8, marginTop: 8 }}>
+                {(m.meta?.changes || []).map((c: any, j: number) => (
+                  <CardView key={j} variant="elevated"
+                            style={{ borderLeft: '4px solid var(--m3e-sys-color-primary)' }}>
+                    <div className="row" style={{ gap: 8 }}>
+                      <Badge tone="primary">AI 变更</Badge>
+                      <span className="caption">{c.action}</span>
+                      <span className="spacer" />
+                      {c.change_id ? (
+                        <button className="bubble-action-btn" onClick={() => undoChange(c.change_id)}>
+                          撤销
+                        </button>
+                      ) : null}
+                    </div>
+                    <div style={{ marginTop: 6, lineHeight: 1.5 }}>{c.description}</div>
+                    {c.reason && <div className="caption" style={{ marginTop: 4 }}>💡 {c.reason}</div>}
+                  </CardView>
+                ))}
+              </div>
+            )}
             {m.role === 'assistant' && !m.streaming && m.content && (
               <div className="bubble-actions">
                 <button className="bubble-action-btn" onClick={() => copyText(m.content)}>
@@ -476,9 +534,9 @@ export default function ChatRoom() {
             onChange={async (e) => {
               if (!e.target.files) return
               const arr = await Promise.all(
-                Array.from(e.target.files).slice(0, 3).map((f) => compressImage(f)),
+                Array.from(e.target.files).slice(0, 9).map((f) => compressImage(f)),
               )
-              setImages((prev) => [...prev, ...arr].slice(0, 3))
+              setImages((prev) => [...prev, ...arr].slice(0, 9))
             }}
           />
           <textarea
@@ -517,7 +575,7 @@ export default function ChatRoom() {
           <div key={p.id} style={{ marginBottom: 10 }}>
             <div className="caption" style={{ margin: '4px 2px' }}>{p.name}</div>
             <ChipRow>
-              {(p.models || []).map((mname: string) => {
+              {(p.model_names || (p.models || []).map((x: any) => x.name || x)).map((mname: string) => {
                 const ref = `${p.id}::${mname}`
                 return (
                   <ChipFilter

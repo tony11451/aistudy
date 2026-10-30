@@ -41,7 +41,9 @@ export default function Settings() {
   const [currentRef, setCurrentRef] = useState('')
   const [showProvider, setShowProvider] = useState(false)
   const [editProvider, setEditProvider] = useState<any>(null)
-  const [provForm, setProvForm] = useState({ name: '', base_url: '', api_key: '', models: '' })
+  const [provForm, setProvForm] = useState({
+    name: '', base_url: '', api_key: '', models: '', vision_models: '', max_images: '5',
+  })
   // 数据
   const importRef = useRef<HTMLInputElement>(null)
   const [importScope, setImportScope] = useState<'personal' | 'full'>('personal')
@@ -111,9 +113,11 @@ export default function Settings() {
             name: prov.name,
             base_url: prov.base_url,
             api_key: '',
-            models: (prov.models || []).join(', '),
+            models: (prov.model_names || []).join(', '),
+            vision_models: (prov.vision_models || []).join(', '),
+            max_images: String(prov.models?.[0]?.max_images || 5),
           }
-        : { name: '', base_url: '', api_key: '', models: '' },
+        : { name: '', base_url: '', api_key: '', models: '', vision_models: '', max_images: '5' },
     )
     setShowProvider(true)
   }
@@ -123,6 +127,11 @@ export default function Settings() {
       .split(/[,，\s]+/)
       .map((m) => m.trim())
       .filter(Boolean)
+    const visionModels = (provForm.vision_models || '')
+      .split(/[,，\s]+/)
+      .map((m) => m.trim())
+      .filter(Boolean)
+    const maxImages = parseInt(provForm.max_images || '5', 10) || 5
     try {
       if (editProvider) {
         await providersApi.update(editProvider.id, {
@@ -130,6 +139,8 @@ export default function Settings() {
           base_url: provForm.base_url,
           api_key: provForm.api_key,
           models,
+          vision_models: visionModels,
+          max_images: maxImages,
         })
       } else {
         await providersApi.create({
@@ -137,6 +148,8 @@ export default function Settings() {
           base_url: provForm.base_url,
           api_key: provForm.api_key,
           models,
+          vision_models: visionModels,
+          max_images: maxImages,
         })
       }
       toast('供应商已保存')
@@ -282,12 +295,13 @@ export default function Settings() {
                 </Btn>
               </div>
               <ChipRow>
-                {(prov.models || []).map((m: string) => {
+                {(prov.model_names || []).map((m: string) => {
                   const ref = `${prov.id}::${m}`
+                  const isVision = (prov.vision_models || []).includes(m)
                   return (
                     <ChipFilter
                       key={ref}
-                      label={m}
+                      label={isVision ? `${m} 👁` : m}
                       selected={currentRef === ref}
                       onClick={async () => {
                         await providersApi.setCurrent(ref)
@@ -504,6 +518,12 @@ export default function Settings() {
           <Field label="模型名（逗号/空格分隔）" value={provForm.models}
                  onChange={(v) => setProvForm({ ...provForm, models: v })}
                  placeholder="mimo-a, mimo-b" />
+          <Field label="支持视觉的模型（逗号分隔，拍照/OCR 用）" value={provForm.vision_models}
+                 onChange={(v) => setProvForm({ ...provForm, vision_models: v })}
+                 placeholder="如 mimo-vl；纯文本模型请留空" />
+          <Field label="单次最大图片数" value={provForm.max_images}
+                 onChange={(v) => setProvForm({ ...provForm, max_images: v })}
+                 placeholder="5" />
           <div className="row">
             <Btn variant="text" onClick={() => setShowProvider(false)}>
               <IconClose size={16} /> 取消

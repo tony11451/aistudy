@@ -226,12 +226,15 @@ def send_message(cid: int, payload: ChatMessageIn,
                .limit(MAX_CONTEXT_MESSAGES)
                .all())[::-1]
 
+    client = get_ai_client(db, user, conv.model_name)
+    max_imgs = getattr(client, "max_images", 10)
     messages = [{"role": "system", "content": _build_system(db, user, conv)}]
     for m in history:
         if m.role == "user":
             messages.append({
                 "role": "user",
-                "content": build_user_content(m.content, m.images or [], user.id),
+                "content": build_user_content(m.content, m.images or [], user.id,
+                                              max_images=max_imgs),
             })
         else:
             messages.append({"role": "assistant", "content": m.content})
@@ -240,8 +243,8 @@ def send_message(cid: int, payload: ChatMessageIn,
         collected = []
         skill_events = []
         change_ids = []
+        change_cards = []
         try:
-            client = get_ai_client(db, user, conv.model_name)
             yield _sse("meta", {"conversation_id": cid, "user_message_id": user_msg.id})
             from ..services.skill_loop import skill_chat_stream
             async for kind, payload in skill_chat_stream(
@@ -255,22 +258,28 @@ def send_message(cid: int, payload: ChatMessageIn,
                 elif kind == "change":
                     if payload.get("change_id"):
                         change_ids.append(payload["change_id"])
+                    change_cards.append({
+                        "change_id": payload.get("change_id"),
+                        "action": payload.get("action", ""),
+                        "description": payload.get("description", ""),
+                        "reason": payload.get("reason", ""),
+                    })
                     yield _sse("change", payload)
                 elif kind == "final":
                     collected = [payload]
             full = "".join(collected)
-            assistant = Message(conversation_id=cid, role="assistant", content=full,
-                                meta={"skills": skill_events, "change_ids": change_ids})
+            meta = {"skills": skill_events, "change_ids": change_ids, "changes": change_cards}
+            assistant = Message(conversation_id=cid, role="assistant", content=full, meta=meta)
             db.add(assistant)
             db.commit()
             db.refresh(assistant)
             yield _sse("done", {"message_id": assistant.id,
                                 "change_ids": change_ids})
         except Exception as e:
+            meta = {"skills": skill_events, "change_ids": change_ids, "changes": change_cards}
             if collected:
                 assistant = Message(conversation_id=cid, role="assistant",
-                                    content="".join(collected),
-                                    meta={"skills": skill_events, "change_ids": change_ids})
+                                    content="".join(collected), meta=meta)
                 db.add(assistant)
                 db.commit()
             yield _sse("error", {"message": str(e)[:400]})

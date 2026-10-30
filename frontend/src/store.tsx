@@ -92,3 +92,57 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export const useToast = () => useContext(ToastCtx)
+
+/** 对话生成完毕小红点（后台流完成时通知；进入对话页清除） */
+let chatReadyFlag = false
+const chatReadyListeners = new Set<(v: boolean) => void>()
+
+export function notifyChatReady() {
+  chatReadyFlag = true
+  chatReadyListeners.forEach((fn) => fn(true))
+}
+
+export function clearChatReady() {
+  if (!chatReadyFlag) return
+  chatReadyFlag = false
+  chatReadyListeners.forEach((fn) => fn(false))
+}
+
+export function useChatBadge() {
+  const [ready, setReady] = useState(chatReadyFlag)
+  useEffect(() => {
+    chatReadyListeners.add(setReady)
+    return () => {
+      chatReadyListeners.delete(setReady)
+    }
+  }, [])
+  return ready
+}
+
+/** 用户学科列表（隐藏学科生效的唯一来源），带全局缓存 */
+let subjectsCache: string[] | null = null
+const subjectsListeners = new Set<(s: string[]) => void>()
+
+export async function refreshSubjects(): Promise<string[]> {
+  try {
+    const s = await api.get<any>('/api/settings')
+    subjectsCache = s.subjects || []
+  } catch {
+    subjectsCache = subjectsCache || []
+  }
+  subjectsListeners.forEach((fn) => fn(subjectsCache!))
+  return subjectsCache!
+}
+
+export function useSubjects(): string[] {
+  const [subjects, setSubjects] = useState<string[]>(subjectsCache || [])
+  useEffect(() => {
+    if (!subjectsCache) refreshSubjects()
+    else setSubjects(subjectsCache)
+    subjectsListeners.add(setSubjects)
+    return () => {
+      subjectsListeners.delete(setSubjects)
+    }
+  }, [])
+  return subjects
+}

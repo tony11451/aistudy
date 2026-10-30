@@ -49,6 +49,7 @@ function renderMarkdown(src: string): string {
   const out: string[] = []
   let inList: 'ul' | 'ol' | null = null
   let inTable = false
+  let inBlock = false
 
   const closeList = () => {
     if (inList) {
@@ -60,6 +61,12 @@ function renderMarkdown(src: string): string {
     if (inTable) {
       out.push('</tbody></table>')
       inTable = false
+    }
+  }
+  const closeBlock = () => {
+    if (inBlock) {
+      out.push('</div>')
+      inBlock = false
     }
   }
 
@@ -74,7 +81,15 @@ function renderMarkdown(src: string): string {
     if (h) {
       closeList()
       closeTable()
-      const lv = Math.min(h[1].length + 1, 4)
+      const level = h[1].length
+      if (level === 2) {
+        // ## 板块标题 → 独立卡片容器（需求 14：AI 自由定板块结构）
+        closeBlock()
+        out.push(`<div class="md-block"><div class="md-block-title">${inline(h[2])}</div>`)
+        inBlock = true
+        continue
+      }
+      const lv = Math.min(level + 1, 4)
       out.push(`<h${lv}>${inline(h[2])}</h${lv}>`)
       continue
     }
@@ -127,6 +142,7 @@ function renderMarkdown(src: string): string {
   }
   closeList()
   closeTable()
+  closeBlock()
   return out.join('\n').replace(/\u0000BLOCK(\d+)\u0000/g, (_, i) => blocks[Number(i)])
 }
 

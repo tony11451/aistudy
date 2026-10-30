@@ -61,7 +61,7 @@ def _serialize(w: WrongQuestion) -> dict:
 async def upload_images(user: User = Depends(get_current_user),
                         files: list[UploadFile] = File(...)):
     ids = []
-    for f in files[:8]:
+    for f in files[:12]:
         data = await f.read()
         if len(data) > 15 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="单张图片不能超过 15MB")

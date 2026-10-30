@@ -1,5 +1,5 @@
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { AuthProvider, ToastProvider, useAuth } from './store'
+import { AuthProvider, ToastProvider, useAuth, useChatBadge, clearChatReady } from './store'
 import { Loading, BottomNav } from './ui'
 import {
   IconBook,
@@ -34,13 +34,39 @@ const TAB_PATHS = ['/', '/mindmap', '/wrong', '/chat', '/mine']
 function AppNav() {
   const { pathname } = useLocation()
   const nav = useNavigate()
+  const chatReady = useChatBadge()
   if (!TAB_PATHS.includes(pathname)) return null
   return (
     <div className="app-nav">
       <BottomNav
-        items={NAV.map((n) => ({ value: n.path, label: n.label, icon: n.icon }))}
+        items={NAV.map((n) => ({
+          value: n.path,
+          label: n.label,
+          icon: (
+            <span style={{ position: 'relative', display: 'inline-flex' }}>
+              {n.icon}
+              {n.path === '/chat' && chatReady && (
+                <span
+                  style={{
+                    position: 'absolute',
+                    top: -2,
+                    right: -4,
+                    width: 9,
+                    height: 9,
+                    borderRadius: '50%',
+                    background: 'var(--m3e-sys-color-error, #ba1a1a)',
+                    boxShadow: '0 0 0 2px var(--m3e-sys-color-surface-container)',
+                  }}
+                />
+              )}
+            </span>
+          ),
+        }))}
         value={pathname}
-        onChange={(v) => nav(v)}
+        onChange={(v) => {
+          if (v === '/chat') clearChatReady()
+          nav(v)
+        }}
       />
     </div>
   )

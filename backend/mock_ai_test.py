@@ -193,9 +193,6 @@ r = c.post("/api/wrong-questions/upload", headers=H,
            files=[("files", ("h.jpg", buf.getvalue(), "image/jpeg"))])
 check("upload_ok", r.status_code == 200 and r.json().get("image_ids"), r.text[:200])
 iid = r.json()["image_ids"][0]
-r = c.post("/api/knowledge/scan-homework", headers=H,
-           json={"subject": "数学", "image_ids": [iid]})
-check("scan_homework", r.status_code == 200 and "一元二次方程" in r.json()["summary"], r.text[:200])
 r = c.get("/api/knowledge/progress", headers=H)
 check("progress_learning", "一元二次方程" in json.dumps(r.json(), ensure_ascii=False))
 
@@ -214,6 +211,13 @@ check("method_saved", len(r.json()) >= 1)
 r = c.post("/api/reports/generate", headers=H, json={})
 check("report_generate", r.status_code == 200 and "学习报告" in r.json()["content"], r.text[:200])
 
+r = c.post("/api/wrong-questions/analyze", headers=H, json={
+    "subject": "数学", "mode": "single", "text": "看图", "image_ids": [iid]})
+item = r.json()["items"][0]
+check("wq_image_saved", item.get("images") and item["images"][0].startswith("/api/images/"),
+      str(item.get("images")))
+check("wq_original_saved", bool(item.get("original_images")))
+
 # 11. 图片任务跟随当前模型（v4 决策），且视觉请求携带图片
 vision_calls = [m for m in CALLS
                 if any(isinstance(msg.get("content"), list)
@@ -223,12 +227,6 @@ check("vision_image_payload", len(vision_calls) >= 1, str(len(vision_calls)))
 check("vision_follows_current_model", all(m.get("model") == "mock-chat" for m in vision_calls),
       str(set(m.get("model") for m in vision_calls)))
 
-r = c.post("/api/wrong-questions/analyze", headers=H, json={
-    "subject": "数学", "mode": "single", "text": "看图", "image_ids": [iid]})
-item = r.json()["items"][0]
-check("wq_image_saved", item.get("images") and item["images"][0].startswith("/api/images/"),
-      str(item.get("images")))
-check("wq_original_saved", bool(item.get("original_images")))
 r = c.get(item["images"][0])
 check("image_served", r.status_code == 200 and len(r.content) > 100)
 

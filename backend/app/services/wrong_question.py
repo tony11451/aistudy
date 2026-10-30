@@ -18,7 +18,7 @@ def _normalize(item: dict, subject: str, grade: str) -> dict:
     if isinstance(kps, str):
         kps = [kps]
     return {
-        "subject": item.get("subject") or subject,
+        "subject": item.get("subject") or subject or "综合",
         "grade": grade,
         "unit": str(item.get("unit") or "")[:64],
         "knowledge_points": [str(k)[:64] for k in kps][:8],
@@ -40,18 +40,23 @@ async def analyze_and_save(db: Session, user: User, *, subject: str, grade: str,
                            image_ids: list[int]) -> list[WrongQuestion]:
     client = get_vision_client(db, user)
     grade = grade or user.grade or ""
+    auto_subject = (not subject) or subject == "自动识别"
+    subject = "" if auto_subject else subject
     instruct = text or ""
     if my_question:
         instruct = (instruct + "\n\n【我的问题】" + my_question).strip() if instruct else "【我的问题】" + my_question
+    if auto_subject:
+        instruct = (instruct + "\n\n请自动识别每道题所属学科，在输出 JSON 的 subject 字段给出（语文/数学/英语/物理/化学/生物/历史/地理/道德与法治）。").strip()
 
     if mode == "batch":
-        system = prompts.batch_question_system_prompt(subject, grade)
+        system = prompts.batch_question_system_prompt(subject or "自动识别", grade)
         instruct = instruct or "请识别并分析这页作业中的所有错题。"
     else:
-        system = prompts.wrong_question_system_prompt(subject, grade)
+        system = prompts.wrong_question_system_prompt(subject or "自动识别", grade)
         instruct = instruct or "请识别并分析这道错题。"
 
-    content = build_user_content(instruct, image_ids, user.id)
+    content = build_user_content(instruct, image_ids, user.id,
+                                 max_images=getattr(client, "max_images", 10))
     messages = [{"role": "system", "content": system}, {"role": "user", "content": content}]
     data = await client.complete_json(messages, temperature=0.3)
 

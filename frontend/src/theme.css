@@ -290,6 +290,26 @@ a {
   line-height: 1.35;
 }
 
+/* ## 板块卡片（需求 14：AI 自由结构的显示容器） */
+.md-block {
+  background: var(--m3e-sys-color-surface-container-low, #f5f2fa);
+  border-radius: var(--md-shape-md, 12px);
+  padding: 12px 14px;
+  margin: 10px 0;
+}
+
+.md-block-title {
+  font-weight: 750;
+  font-size: 1rem;
+  margin-bottom: 8px;
+  padding-left: 10px;
+  border-left: 4px solid var(--m3e-sys-color-primary, #4f46e5);
+}
+
+.bubble-user .md-block {
+  background: rgba(255, 255, 255, 0.14);
+}
+
 .md-content h1 {
   font-size: 1.3rem;
 }

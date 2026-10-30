@@ -26,8 +26,7 @@ import {
   IconBtn,
 } from '../ui'
 import { CONFIDENCE_LABEL, MASTERY_LABEL, STATE_LABEL, masteryTone, useAsync } from '../components'
-import { SUBJECTS } from '../constants'
-import { useToast } from '../store'
+import { useToast, useSubjects } from '../store'
 import {
   IconCheck,
   IconChat,
@@ -72,6 +71,7 @@ const nodeTypes = { kp: KpNode }
 export default function Mindmap() {
   const nav = useNavigate()
   const toast = useToast()
+  const subjects = useSubjects()
   const [subject, setSubject] = useState('数学')
   const [kind, setKind] = useState<KindFilter>('')
   const [selected, setSelected] = useState<any>(null)
@@ -234,7 +234,7 @@ export default function Mindmap() {
       />
 
       <ChipRow>
-        {SUBJECTS.map((s) => (
+        {subjects.map((s) => (
           <ChipFilter key={s} label={s} selected={subject === s} onClick={() => setSubject(s)} />
         ))}
       </ChipRow>

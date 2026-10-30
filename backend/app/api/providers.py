@@ -1,4 +1,4 @@
-"""供应商与模型管理 API。"""
+"""供应商与模型管理 API。模型条目：{"name", "vision": bool, "max_images": int}。"""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,30 @@ from ..services.context import current_model_ref, migrate_legacy_models
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 
+def normalize_models(models, vision_names=None, max_images=5) -> list[dict]:
+    """接受 [str|dict] 与视觉名单，输出规范 dict 列表。"""
+    vision_set = {v.strip() for v in (vision_names or []) if v.strip()}
+    out = []
+    for m in models or []:
+        if isinstance(m, dict):
+            entry = {
+                "name": str(m.get("name") or "").strip(),
+                "vision": bool(m.get("vision")),
+                "max_images": int(m.get("max_images") or max_images),
+            }
+        else:
+            name = str(m).strip()
+            entry = {"name": name, "vision": name in vision_set,
+                     "max_images": max_images}
+        if entry["name"]:
+            out.append(entry)
+    return out[:30]
+
+
+def model_names(p: AIProvider) -> list[str]:
+    return [m["name"] if isinstance(m, dict) else str(m) for m in (p.models or [])]
+
+
 def _mask(key: str) -> str:
     if not key:
         return ""
@@ -19,13 +43,16 @@ def _mask(key: str) -> str:
 
 
 def _serialize(p: AIProvider) -> dict:
+    models = normalize_models(p.models)
     return {
         "id": p.id,
         "name": p.name,
         "base_url": p.base_url,
         "api_key_masked": _mask(p.api_key),
         "has_key": bool(p.api_key),
-        "models": p.models or [],
+        "models": models,
+        "model_names": [m["name"] for m in models],
+        "vision_models": [m["name"] for m in models if m["vision"]],
         "is_active": p.is_active,
         "sort_order": p.sort_order,
     }
@@ -51,11 +78,13 @@ def create_provider(payload: dict, _: User = Depends(require_admin),
     base_url = (payload.get("base_url") or "").strip()
     if not name or not base_url:
         raise HTTPException(status_code=400, detail="缺少名称或 Base URL")
-    models = [m.strip() for m in (payload.get("models") or []) if m.strip()]
+    models = normalize_models(payload.get("models"),
+                              payload.get("vision_models"),
+                              int(payload.get("max_images") or 5))
     p = AIProvider(
         name=name[:64], base_url=base_url[:256],
         api_key=(payload.get("api_key") or "").strip()[:256],
-        models=models[:30],
+        models=models,
     )
     db.add(p)
     db.commit()
@@ -64,7 +93,7 @@ def create_provider(payload: dict, _: User = Depends(require_admin),
     row = db.query(AppSettings).filter(AppSettings.id == 1).first()
     if row and not row.current_provider_id and p.models:
         row.current_provider_id = p.id
-        row.current_model = p.models[0]
+        row.current_model = model_names(p)[0]
         db.commit()
     return _serialize(p)
 
@@ -82,7 +111,9 @@ def update_provider(pid: int, payload: dict, _: User = Depends(require_admin),
     if payload.get("api_key") and "*" not in str(payload["api_key"])[:6]:
         p.api_key = str(payload["api_key"]).strip()[:256]
     if "models" in payload:
-        p.models = [m.strip() for m in (payload.get("models") or []) if m.strip()][:30]
+        p.models = normalize_models(payload.get("models"),
+                                    payload.get("vision_models"),
+                                    int(payload.get("max_images") or 5))
     if "is_active" in payload:
         p.is_active = bool(payload["is_active"])
     db.commit()

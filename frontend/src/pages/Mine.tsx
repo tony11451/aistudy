@@ -15,8 +15,7 @@ import {
   IconBtn,
 } from '../ui'
 import { Markdown, MASTERY_LABEL, masteryTone, useAsync } from '../components'
-import { SUBJECTS } from '../constants'
-import { useAuth, useToast } from '../store'
+import { useAuth, useToast, useSubjects } from '../store'
 import {
   IconCheck,
   IconClose,
@@ -248,7 +247,7 @@ function ProfileTab() {
             <Btn
               variant="filled"
               onClick={() => {
-                setEditSubject(SUBJECTS[1])
+                setEditSubject('数学')
                 setEditText('')
               }}
             >
@@ -270,6 +269,7 @@ function ProfileTab() {
 }
 
 function MethodsTab() {
+  const subjects = useSubjects()
   const [subject, setSubject] = useState('')
   const { data, loading, reload } = useAsync(
     () => api.get<any[]>(`/api/methods${subject ? `?subject=${encodeURIComponent(subject)}` : ''}`),
@@ -322,7 +322,7 @@ function MethodsTab() {
       </CardView>
 
       <ChipRow>
-        {SUBJECTS.map((s) => (
+        {subjects.map((s) => (
           <ChipFilter key={s} label={s} selected={subject === s} onClick={() => setSubject(subject === s ? '' : s)} />
         ))}
       </ChipRow>
@@ -367,6 +367,7 @@ function MethodsTab() {
 }
 
 function SelectFieldMini({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const subjects = useSubjects()
   return (
     <select
       value={value}
@@ -381,7 +382,7 @@ function SelectFieldMini({ value, onChange }: { value: string; onChange: (v: str
         font: 'inherit',
       }}
     >
-      {SUBJECTS.map((s) => (
+      {subjects.map((s) => (
         <option key={s}>{s}</option>
       ))}
     </select>

@@ -87,15 +87,32 @@ export async function streamChat(
     onError?: (msg: string) => void
   },
 ) {
-  const resp = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${getToken()}`,
-    },
-    body: JSON.stringify(body),
-  })
+  // 流空闲超时（v5 修复）：90 秒无数据视为中断，避免「一直转圈」
+  const controller = new AbortController()
+  let idleTimer: ReturnType<typeof setTimeout> | null = null
+  const bumpIdle = () => {
+    if (idleTimer) clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(), 90_000)
+  }
+  let resp: Response
+  try {
+    bumpIdle()
+    resp = await fetch(`/api/chat/conversations/${conversationId}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${getToken()}`,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+  } catch (e: any) {
+    if (idleTimer) clearTimeout(idleTimer)
+    handlers.onError?.(e?.name === 'AbortError' ? 'AI 响应超时，请重试' : '网络异常，请重试')
+    return
+  }
   if (!resp.ok || !resp.body) {
+    if (idleTimer) clearTimeout(idleTimer)
     let msg = `请求失败 (${resp.status})`
     try {
       msg = (await resp.json())?.detail || msg
@@ -108,6 +125,7 @@ export async function streamChat(
   let buffer = ''
   let eventName = 'message'
   let dataLines: string[] = []
+  let finished = false
 
   const flush = () => {
     if (!dataLines.length) return
@@ -121,29 +139,47 @@ export async function streamChat(
     else if (eventName === 'meta') handlers.onMeta?.(payload)
     else if (eventName === 'skill') handlers.onSkill?.(payload)
     else if (eventName === 'change') handlers.onChange?.(payload)
-    else if (eventName === 'done') handlers.onDone?.(payload)
-    else if (eventName === 'error') handlers.onError?.(payload?.message || '未知错误')
+    else if (eventName === 'done') {
+      finished = true
+      handlers.onDone?.(payload)
+    } else if (eventName === 'error') {
+      finished = true
+      handlers.onError?.(payload?.message || '未知错误')
+    }
     eventName = 'message'
   }
 
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    const lines = buffer.split('\n')
-    buffer = lines.pop() || ''
-    for (const line of lines) {
-      if (line.startsWith('event:')) {
-        flush()
-        eventName = line.slice(6).trim()
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).trim())
-      } else if (line.trim() === '') {
-        flush()
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      bumpIdle()
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (line.startsWith('event:')) {
+          flush()
+          eventName = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          dataLines.push(line.slice(5).trim())
+        } else if (line.trim() === '') {
+          flush()
+        }
       }
     }
+    flush()
+    // done/error 必达：流意外结束时也要解锁界面
+    if (!finished) {
+      handlers.onError?.('连接中断，回答可能不完整，请重试')
+    }
+  } catch (e: any) {
+    if (!finished) {
+      handlers.onError?.(e?.name === 'AbortError' ? 'AI 响应超时，请重试' : '网络中断，请重试')
+    }
+  } finally {
+    if (idleTimer) clearTimeout(idleTimer)
   }
-  flush()
 }
 
 /** 客户端压缩图片：最长边 1600px，JPEG 输出 */

@@ -232,19 +232,6 @@ def progress(user: User = Depends(get_current_user), db: Session = Depends(get_d
     return knowledge_svc.progress_summary(db, user)
 
 
-@router.post("/knowledge/scan-homework")
-async def scan_homework(payload: ScanHomeworkIn, user: User = Depends(get_current_user),
-                        db: Session = Depends(get_db)):
-    if not payload.image_ids:
-        raise HTTPException(status_code=400, detail="请先上传作业照片")
-    try:
-        result = await extras_svc.scan_homework(
-            db, user, payload.subject, payload.grade or user.grade, payload.image_ids)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"AI 识别失败：{e}")
-    return result
-
-
 # ---------- 学习档案 ----------
 @router.get("/profile")
 def get_profile(user: User = Depends(get_current_user), db: Session = Depends(get_db)):

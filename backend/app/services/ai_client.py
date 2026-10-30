@@ -132,13 +132,13 @@ def image_to_data_uri(image_id: int, user_id: int) -> str:
 
 
 def build_user_content(text: str, image_ids: list[int], user_id: int,
-                       vision: bool = True) -> list | str:
-    """构建含图片的 user content。"""
+                       vision: bool = True, max_images: int = 10) -> list | str:
+    """构建含图片的 user content；max_images 按模型视觉能力裁剪。"""
     if not image_ids or not vision:
         return text or "请分析。"
     parts: list = []
     if text:
         parts.append({"type": "text", "text": text})
-    for iid in image_ids[:6]:
+    for iid in image_ids[:max_images]:
         parts.append({"type": "image_url", "image_url": {"url": image_to_data_uri(iid, user_id)}})
     return parts

@@ -1,11 +1,26 @@
 """按用户/供应商解析 AI 配置（供应商体系 + 旧配置兼容）。
 
 模型引用格式："{provider_id}::{model}"；也兼容裸模型名（在各供应商中查找）。
+模型条目：{"name", "vision": bool, "max_images": int}（兼容旧字符串条目）。
 """
 from sqlalchemy.orm import Session
 
 from ..models import AIProvider, AppSettings, User
 from .ai_client import AIClient, AIConfigError
+
+
+def _norm_models(p: AIProvider) -> list[dict]:
+    out = []
+    for m in (p.models or []):
+        if isinstance(m, dict):
+            out.append({
+                "name": str(m.get("name") or "").strip(),
+                "vision": bool(m.get("vision")),
+                "max_images": int(m.get("max_images") or 5),
+            })
+        else:
+            out.append({"name": str(m).strip(), "vision": False, "max_images": 5})
+    return [m for m in out if m["name"]]
 
 
 def _get_row(db: Session) -> AppSettings:
@@ -65,16 +80,18 @@ def resolve_model(db: Session, user: User, model_ref: str = "") -> tuple[AIProvi
         if pid:
             p = db.query(AIProvider).filter(AIProvider.id == pid).first()
             if p:
-                return p, model or (p.models[0] if p.models else "")
+                names = [m["name"] for m in _norm_models(p)]
+                return p, model or (names[0] if names else "")
         else:
             for p in db.query(AIProvider).filter(AIProvider.is_active.is_(True)).all():
-                if model in (p.models or []):
+                if model in [m["name"] for m in _norm_models(p)]:
                     return p, model
     # 个人覆盖（保留旧能力）
     if user.api_base_url and user.api_key:
         p = AIProvider(name="personal", base_url=user.api_base_url,
                        api_key=user.api_key,
-                       models=[user.chat_model] if user.chat_model else [])
+                       models=[{"name": user.chat_model, "vision": True, "max_images": 5}]
+                       if user.chat_model else [])
         return p, user.chat_model
     row = _get_row(db)
     if row.current_provider_id and row.current_model:
@@ -84,31 +101,65 @@ def resolve_model(db: Session, user: User, model_ref: str = "") -> tuple[AIProvi
     # 兜底：首个活跃供应商的首个模型
     p = resolve_provider(db)
     if p:
-        return p, (p.models[0] if p.models else [])
+        names = [m["name"] for m in _norm_models(p)]
+        return p, (names[0] if names else "")
     # 兼容旧版：直接用全局 base_url/key/chat_model
     if row.api_base_url and row.api_key and row.chat_model:
         legacy = AIProvider(name="global-legacy", base_url=row.api_base_url,
-                            api_key=row.api_key, models=[row.chat_model])
+                            api_key=row.api_key,
+                            models=[{"name": row.chat_model, "vision": True, "max_images": 5}])
         return legacy, row.chat_model
     return None, ""
+
+
+def _model_caps(p: AIProvider | None, model: str) -> dict:
+    if not p:
+        return {"vision": False, "max_images": 5}
+    for m in _norm_models(p):
+        if m["name"] == model:
+            return m
+    return {"vision": False, "max_images": 5}
 
 
 def get_ai_client(db: Session, user: User, model_ref: str = "") -> AIClient:
     provider, model = resolve_model(db, user, model_ref)
     if not provider or not model:
         raise AIConfigError("尚未配置可用模型：请在「设置 → 供应商」添加供应商与模型")
-    return AIClient(
+    caps = _model_caps(provider, model)
+    client = AIClient(
         base_url=provider.base_url,
         api_key=provider.api_key,
         chat_model=model,
         vision_model=model,
         temperature=_get_row(db).temperature or 0.7,
     )
+    client.max_images = caps["max_images"]
+    client.supports_vision = caps["vision"]
+    return client
 
 
 def get_vision_client(db: Session, user: User, model_ref: str = "") -> AIClient:
-    """图片识别跟随当前选中模型（按产品决策）。"""
-    return get_ai_client(db, user, model_ref)
+    """图片任务自动路由到「支持视觉」的模型；无可用则报错提示配置。"""
+    provider, model = resolve_model(db, user, model_ref)
+    caps = _model_caps(provider, model)
+    if provider and caps["vision"]:
+        client = get_ai_client(db, user, model_ref)
+        return client
+    # 当前模型不支持视觉 → 找任意供应商的视觉模型
+    for p in db.query(AIProvider).filter(AIProvider.is_active.is_(True)).all():
+        for m in _norm_models(p):
+            if m["vision"]:
+                client = AIClient(
+                    base_url=p.base_url, api_key=p.api_key,
+                    chat_model=m["name"], vision_model=m["name"],
+                    temperature=_get_row(db).temperature or 0.7,
+                )
+                client.max_images = m["max_images"]
+                client.supports_vision = True
+                return client
+    raise AIConfigError(
+        "图片任务需要支持视觉的模型：请在「设置 → 供应商」为某个模型勾选「支持视觉」"
+        "（如 GLM-4V、Qwen-VL、MiMo-VL 等）")
 
 
 def current_model_ref(db: Session, user: User) -> str:

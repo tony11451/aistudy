@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { Btn, CardView, ChipFilter, ChipRow, Empty, Field, Loading, Badge } from '../ui'
 import { MASTERY_LABEL, masteryTone, useAsync } from '../components'
-import { SUBJECTS } from '../constants'
 import { IconPlus, IconSearch } from '../icons'
+import { useSubjects } from '../store'
 
 export default function WrongList() {
+  const subjects = useSubjects()
   const nav = useNavigate()
   const [params] = useSearchParams()
   const [subject, setSubject] = useState(params.get('subject') || '')
@@ -54,7 +55,7 @@ export default function WrongList() {
       </form>
 
       <ChipRow>
-        {SUBJECTS.map((s) => (
+        {subjects.map((s) => (
           <ChipFilter key={s} label={s} selected={subject === s} onClick={() => setSubject(subject === s ? '' : s)} />
         ))}
       </ChipRow>
