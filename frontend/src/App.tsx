@@ -5,6 +5,7 @@ import {
   IconBook,
   IconChat,
   IconHome,
+  IconList,
   IconMap,
   IconUser,
 } from './icons'
@@ -18,6 +19,8 @@ import WrongList from './pages/WrongList'
 import WrongDetail from './pages/WrongDetail'
 import ChatList from './pages/ChatList'
 import ChatRoom from './pages/ChatRoom'
+import Library from './pages/Library'
+import BookDetail from './pages/BookDetail'
 import Mine from './pages/Mine'
 import Settings from './pages/Settings'
 
@@ -26,10 +29,11 @@ const NAV = [
   { path: '/mindmap', icon: <IconMap size={22} />, label: '图谱' },
   { path: '/wrong', icon: <IconBook size={22} />, label: '错题' },
   { path: '/chat', icon: <IconChat size={22} />, label: '对话' },
+  { path: '/library', icon: <IconList size={22} />, label: '档案' },
   { path: '/mine', icon: <IconUser size={22} />, label: '我的' },
 ]
 
-const TAB_PATHS = ['/', '/mindmap', '/wrong', '/chat', '/mine']
+const TAB_PATHS = ['/', '/mindmap', '/wrong', '/chat', '/library', '/mine']
 
 function AppNav() {
   const { pathname } = useLocation()
@@ -91,6 +95,8 @@ function Guarded() {
         <Route path="/wrong/:id" element={<WrongDetail />} />
         <Route path="/chat" element={<ChatList />} />
         <Route path="/chat/:id" element={<ChatRoom />} />
+        <Route path="/library" element={<Library />} />
+        <Route path="/library/book/:id" element={<BookDetail />} />
         <Route path="/mine" element={<Mine />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

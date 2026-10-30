@@ -235,3 +235,70 @@ export const dataApi = {
     return request<any>(`/api/data/import?scope=${scope}`, { method: 'POST', body: fd })
   },
 }
+
+/** v5：档案库 */
+export const libraryApi = {
+  overview: (subject = '') =>
+    api.get<any>(`/api/library/overview${subject ? `?subject=${encodeURIComponent(subject)}` : ''}`),
+  search: (params: { q?: string; subject?: string; kind?: string; source?: string; limit?: number }) => {
+    const qs = Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== '')
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+      .join('&')
+    return api.get<any>(`/api/library/items${qs ? `?${qs}` : ''}`)
+  },
+  getItem: (id: number) => api.get<any>(`/api/library/items/${id}`),
+  updateItem: (id: number, body: any) => api.put<any>(`/api/library/items/${id}`, body),
+  deleteItem: (id: number) => api.del(`/api/library/items/${id}`),
+  moveItem: (id: number, body: any) => api.put<any>(`/api/library/items/${id}`, body),
+  linkItem: (id: number, boardId: number) => api.post(`/api/library/items/${id}/link`, { board_id: boardId }),
+  uploadItems: async (files: File[], opts: { subject?: string; kind?: string; board_id?: number; book_id?: number; page_no?: number }) => {
+    const fd = new FormData()
+    files.forEach((f) => fd.append('files', f))
+    const qs = Object.entries(opts)
+      .filter(([, v]) => v !== undefined && v !== '' && v !== 0)
+      .map(([k, v]) => `${k}=${encodeURIComponent(String(v))}`)
+      .join('&')
+    return request<any>(`/api/library/items/upload${qs ? `?${qs}` : ''}`, { method: 'POST', body: fd })
+  },
+  createTextItem: (body: any) => api.post<any>('/api/library/items/text', body),
+  downloadUrl: (id: number) => `/api/library/items/${id}/download`,
+  download: async (id: number, filename: string) => {
+    const resp = await fetch(libraryApi.downloadUrl(id), {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    })
+    if (!resp.ok) throw new Error('下载失败')
+    const blob = await resp.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+  // 书本
+  createBook: (body: any) => api.post<any>('/api/library/books', body),
+  updateBook: (id: number, body: any) => api.put<any>(`/api/library/books/${id}`, body),
+  deleteBook: (id: number) => api.del(`/api/library/books/${id}`),
+  bookPages: (id: number) => api.get<any>(`/api/library/books/${id}/pages`),
+  addPage: async (bookId: number, file: File, pageNo = 0) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request<any>(`/api/library/books/${bookId}/pages?page_no=${pageNo}`, {
+      method: 'POST',
+      body: fd,
+    })
+  },
+  // 板块
+  boards: (subject = '') =>
+    api.get<any[]>(`/api/library/boards${subject ? `?subject=${encodeURIComponent(subject)}` : ''}`),
+  createBoard: (body: any) => api.post<any>('/api/library/boards', body),
+  boardTemplates: (id: number) => api.post<any>(`/api/library/boards/${id}/templates`, {}),
+  updateBoard: (id: number, body: any) => api.put<any>(`/api/library/boards/${id}`, body),
+  deleteBoard: (id: number) => api.del(`/api/library/boards/${id}`),
+  // 书签 / OCR
+  bookmarks: () => api.get<any[]>('/api/library/bookmarks'),
+  addBookmark: (body: any) => api.post<any>('/api/library/bookmarks', body),
+  deleteBookmark: (id: number) => api.del(`/api/library/bookmarks/${id}`),
+  runOcr: () => api.post<any>('/api/library/ocr/run', {}),
+}

@@ -79,7 +79,7 @@ async def _execute_calls(db: Session, user: User, ctx: dict,
             continue
         yield ("skill", {"name": name, "status": "start", "args": args})
         try:
-            result = execute_skill(db, user, ctx, name, args)
+            result = await execute_skill(db, user, ctx, name, args)
         except Exception as e:
             summary = f"技能执行失败：{e}"
             yield ("skill", {"name": name, "status": "error", "summary": summary})

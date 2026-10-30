@@ -207,3 +207,108 @@ class Report(Base):
     title: Mapped[str] = mapped_column(String(128), default="")
     content: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ===================== 档案库（v5） =====================
+
+class LibraryBook(Base):
+    """书本区/笔记本：教材、笔记（按页码组织）。"""
+
+    __tablename__ = "library_books"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(32), index=True, default="")
+    kind: Mapped[str] = mapped_column(String(16), default="textbook")  # textbook | notebook
+    name: Mapped[str] = mapped_column(String(128))
+    cover_image: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LibraryPage(Base):
+    """书本页面：照片 + OCR 文字 + 页码（电子书式浏览）。"""
+
+    __tablename__ = "library_pages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    book_id: Mapped[int] = mapped_column(ForeignKey("library_books.id"), index=True)
+    page_no: Mapped[int] = mapped_column(Integer, default=0)
+    image_path: Mapped[str] = mapped_column(String(256), default="")
+    ocr_text: Mapped[str] = mapped_column(Text, default="")
+    ocr_status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|done|failed|none
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LibraryBoard(Base):
+    """板块区：大板块 → 分板块（如「第一次物理作业 → 题目版/答案版」）。"""
+
+    __tablename__ = "library_boards"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(32), index=True, default="")
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey("library_boards.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(128))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LibraryItem(Base):
+    """资料条目：图片/文字/附件/复习资料/错题归档。board_id=NULL 时按 kind 归入图片库/附件库。"""
+
+    __tablename__ = "library_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    subject: Mapped[str] = mapped_column(String(32), index=True, default="")
+    board_id: Mapped[int | None] = mapped_column(ForeignKey("library_boards.id"), nullable=True, index=True)
+    book_id: Mapped[int | None] = mapped_column(ForeignKey("library_books.id"), nullable=True, index=True)
+    page_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    kind: Mapped[str] = mapped_column(String(16), default="image")  # image|text|attachment|review|wrong_question
+    title: Mapped[str] = mapped_column(String(256), default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    file_path: Mapped[str] = mapped_column(String(256), default="")
+    file_name: Mapped[str] = mapped_column(String(256), default="")
+    file_type: Mapped[str] = mapped_column(String(32), default="")
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # photo|upload|manual|wrong_question|generated
+    ocr_text: Mapped[str] = mapped_column(Text, default="")
+    ocr_status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|done|failed|none
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LibraryLink(Base):
+    """附件/条目挂载到板块（附件独立成库，但可在任意板块出现）。"""
+
+    __tablename__ = "library_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("library_items.id"), index=True)
+    board_id: Mapped[int] = mapped_column(ForeignKey("library_boards.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class Bookmark(Base):
+    """书签：图片/文字/错题/书页均可标记，统一查看。"""
+
+    __tablename__ = "bookmarks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String(32), default="")  # image|text|wrong_question|library_item|book_page
+    target_id: Mapped[int] = mapped_column(Integer, default=0)
+    label: Mapped[str] = mapped_column(String(128), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ConversationSummary(Base):
+    """对话摘要（独立 Agent 生成，默认不进消息流）。"""
+
+    __tablename__ = "conversation_summaries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

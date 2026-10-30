@@ -95,6 +95,19 @@ async def analyze_and_save(db: Session, user: User, *, subject: str, grade: str,
                 general_method=wq.method_general,
                 source_question_id=wq.id,
             ))
+    # 错题照片自动归档进档案库（需求 12：图片库，可手动归入书本/板块）
+    from ..models import LibraryItem
+    for wq in saved:
+        for img in (wq.images or []):
+            fname = img.split("/")[-1]
+            db.add(LibraryItem(
+                user_id=user.id, subject=wq.subject, kind="wrong_question",
+                title=(wq.question_text or "错题照片")[:256],
+                content=(wq.wrong_reason or "")[:2000],
+                file_path=fname, file_name=fname, file_type="image/jpeg",
+                source="wrong_question",
+                ocr_text=(wq.question_text or "")[:2000],
+                ocr_status="pending"))
     db.commit()
     for wq in saved:
         db.refresh(wq)
