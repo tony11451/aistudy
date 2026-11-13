@@ -30,6 +30,20 @@ docker compose up -d --build
 
 打开 `http://<NAS-IP>:8000`，首次访问初始化管理员 → 进入「设置 → 全局 AI」填写 API。之后学生/家长可自由注册（登录页 → 注册）。
 
+### 本机测试部署（Windows / E:\server\aistudy）
+
+已在本机 Docker Desktop 部署测试实例（与飞牛互不影响）：
+
+```bash
+cd E:\server\aistudy
+# .env 中 APP_PORT=5000（Windows 系统常保留 8000 附近端口段）
+docker compose up -d --build
+# 访问 http://localhost:5000
+```
+
+代码更新后运行 `E:\server\aistudy\deploy.ps1`（从 `D:\Projects\ST` 同步并重建）。
+飞牛侧 compose 仍用默认 8000 端口，无需改动。
+
 > 默认 `Dockerfile` 为单阶段构建（前端 `frontend/dist` 已预构建好），只需拉取 `python:3.12-slim` 一个基础镜像。
 > 若修改了前端源码，先 `cd frontend && npm run build` 再构建镜像；或改用 `Dockerfile.full`（`docker build -f Dockerfile.full .`）从源码完整构建。
 
