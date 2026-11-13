@@ -7,7 +7,7 @@ import tempfile
 import time
 import urllib.request
 
-PORT = 8041
+PORT = 18041
 BASE = f"http://127.0.0.1:{PORT}"
 env = {**os.environ, "DATA_DIR": tempfile.mkdtemp(prefix="st_v4_")}
 proc = subprocess.Popen(

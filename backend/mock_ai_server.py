@@ -59,5 +59,5 @@ async def chat_completions(req: Request):
 
 
 if __name__ == "__main__":
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8901
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else 18901
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="error")

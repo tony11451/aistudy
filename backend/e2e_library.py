@@ -9,7 +9,7 @@ import time
 import urllib.parse
 import urllib.request
 
-PORT = 8051
+PORT = 18051
 BASE = f"http://127.0.0.1:{PORT}"
 DATA_DIR = tempfile.mkdtemp(prefix="st_lib_")
 env = {**os.environ, "DATA_DIR": DATA_DIR}

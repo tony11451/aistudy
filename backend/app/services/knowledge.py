@@ -102,7 +102,8 @@ def _auto_positions(db: Session, user: User, subject: str) -> None:
 def build_mindmap(db: Session, user: User, subject: str, kind_filter: str = "") -> dict:
     _auto_positions(db, user, subject)
     q = db.query(KnowledgeNode).filter(
-        KnowledgeNode.user_id == user.id, KnowledgeNode.subject == subject)
+        KnowledgeNode.user_id == user.id, KnowledgeNode.subject == subject,
+        KnowledgeNode.archived.is_(False))
     nodes = q.order_by(KnowledgeNode.sort_order, KnowledgeNode.id).all()
     by_id = {n.id: n for n in nodes}
 
@@ -193,6 +194,7 @@ def serialize_node(n: KnowledgeNode) -> dict:
         "note": n.note,
         "description": n.description,
         "source": n.source,
+        "archived": bool(n.archived),
         "pos_x": n.pos_x,
         "pos_y": n.pos_y,
         "created_at": n.created_at.isoformat() if n.created_at else None,

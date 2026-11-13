@@ -23,7 +23,8 @@ def mindmap(subject: str = Query("数学"), kind: str = Query(""),
 @router.get("/knowledge/nodes")
 def list_nodes(subject: str = Query(""), user: User = Depends(get_current_user),
                db: Session = Depends(get_db)):
-    q = db.query(KnowledgeNode).filter(KnowledgeNode.user_id == user.id)
+    q = db.query(KnowledgeNode).filter(KnowledgeNode.user_id == user.id,
+                                       KnowledgeNode.archived.is_(False))
     if subject:
         q = q.filter(KnowledgeNode.subject == subject)
     nodes = q.order_by(KnowledgeNode.sort_order, KnowledgeNode.id).all()
@@ -51,6 +52,8 @@ def create_node(payload: dict, user: User = Depends(get_current_user),
         node.description = str(payload["description"])[:2000]
     if payload.get("confidence") in ("suspected", "confirmed"):
         node.confidence = payload["confidence"]
+    if node_type == "weakness" and node.mastery in ("unknown", None):
+        node.mastery = "weak"
     db.commit()
     db.refresh(node)
     return knowledge_svc.serialize_node(node)

@@ -106,7 +106,7 @@ async def chat_completions(req: Request):
 
 
 def run_mock():
-    uvicorn.run(mock, host="127.0.0.1", port=8901, log_level="error")
+    uvicorn.run(mock, host="127.0.0.1", port=18901, log_level="error")
 
 
 threading.Thread(target=run_mock, daemon=True).start()
@@ -128,7 +128,7 @@ def check(name, cond, extra=""):
 r = c.post("/api/auth/setup", json={"username": "admin", "password": "123456", "display_name": "我"})
 H = {"Authorization": f"Bearer {r.json()['access_token']}"}
 c.put("/api/settings/global", headers=H, json={
-    "api_base_url": "http://127.0.0.1:8901/v1", "api_key": "sk-mock",
+    "api_base_url": "http://127.0.0.1:18901/v1", "api_key": "sk-mock",
     "chat_model": "mock-chat", "vision_model": "mock-vision",
     "temperature": 0.5, "system_extra_prompt": "extra-hint"})
 
@@ -263,12 +263,12 @@ check("chat_model_override", "event: done" in r.text, r.text[:100])
 
 # 16. 供应商体系（v4）：多供应商共存 + 模型切换
 r = c.post("/api/providers", headers=H, json={
-    "name": "xiaomi-mimo", "base_url": "http://127.0.0.1:8901/v1",
+    "name": "xiaomi-mimo", "base_url": "http://127.0.0.1:18901/v1",
     "api_key": "sk-mimo", "models": ["mimo-a", "mimo-b"]})
 check("provider_create", r.status_code == 200 and len(r.json()["models"]) == 2, r.text[:200])
 pid = r.json()["id"]
 r = c.post("/api/providers", headers=H, json={
-    "name": "deepseek", "base_url": "http://127.0.0.1:8901/v1",
+    "name": "deepseek", "base_url": "http://127.0.0.1:18901/v1",
     "api_key": "sk-ds", "models": ["deepseek-chat"]})
 pid2 = r.json()["id"]
 r = c.get("/api/providers", headers=H)

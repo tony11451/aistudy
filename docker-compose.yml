@@ -5,7 +5,7 @@ services:
       dockerfile: Dockerfile.full
     container_name: ai-wrong-question
     ports:
-      - "8000:8000"
+      - "${APP_PORT:-8000}:8000"
     volumes:
       - ./data:/data
     environment:
