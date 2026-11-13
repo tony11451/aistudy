@@ -12,6 +12,8 @@ from ..deps import get_current_user
 from ..models import User, WrongQuestion
 from ..schemas import AnalyzeIn, WrongQuestionUpdate
 from ..services import profile as profile_svc
+from ..services.ai_client import build_user_content
+from ..services.context import get_vision_client
 from ..services.wrong_question import analyze_and_save
 
 router = APIRouter(prefix="/api/wrong-questions", tags=["wrong-questions"])
@@ -103,6 +105,90 @@ async def analyze(payload: AnalyzeIn, background: BackgroundTasks,
     )
     background.add_task(_background_profile_update, user.id, rows[0].subject, summary)
     return {"items": [_serialize(w) for w in rows]}
+
+
+@router.post("/detect-questions")
+async def detect_questions(payload: AnalyzeIn, user: User = Depends(get_current_user),
+                           db: Session = Depends(get_db)):
+    """整页照片 → 仅识别题目清单（不作答），供用户勾选哪道题错了（需求 13）。"""
+    if not payload.image_ids:
+        raise HTTPException(status_code=400, detail="请先上传照片")
+    from .. import prompts as prompts_mod
+    client = get_vision_client(db, user)
+    system = prompts_mod.detect_questions_system_prompt(payload.subject or "",
+                                                        payload.grade or user.grade)
+    content = build_user_content("请识别这页上的所有题目。", payload.image_ids, user.id,
+                                 max_images=getattr(client, "max_images", 10))
+    try:
+        data = await client.complete_json([
+            {"role": "system", "content": system},
+            {"role": "user", "content": content},
+        ], temperature=0.2)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 识别失败：{e}")
+    questions = data.get("questions") if isinstance(data, dict) else data
+    if not isinstance(questions, list):
+        questions = []
+    return {"questions": questions[:20]}
+
+
+@router.post("/analyze-selected")
+async def analyze_selected(payload: dict, background: BackgroundTasks,
+                           user: User = Depends(get_current_user),
+                           db: Session = Depends(get_db)):
+    """用户从整页中勾选的题目 + 错因 → 针对该题深度分析（需求 13）。"""
+    question_text = str(payload.get("question_text") or "").strip()
+    if not question_text:
+        raise HTTPException(status_code=400, detail="缺少题目")
+    wrong_hint = str(payload.get("wrong_hint") or "").strip()
+    subject = str(payload.get("subject") or "")
+    grade = str(payload.get("grade") or user.grade or "")
+    from .. import prompts as prompts_mod
+    from ..services.wrong_question import _normalize
+    client = get_vision_client(db, user)
+    system = prompts_mod.analyze_selected_question_system_prompt(subject, grade)
+    instruct = f"【选出的题目】\n{question_text}\n\n【我的错因说明】{wrong_hint or '（未填写）'}"
+    image_ids = payload.get("image_ids") or []
+    content = build_user_content(instruct, image_ids, user.id,
+                                 max_images=getattr(client, "max_images", 10))
+    try:
+        data = await client.complete_json([
+            {"role": "system", "content": system},
+            {"role": "user", "content": content},
+        ], temperature=0.3)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 分析失败：{e}")
+    item = data if isinstance(data, dict) else {}
+    norm = _normalize(item, subject, grade)
+    if not norm["question_text"] and not norm["correct_solution"]:
+        raise HTTPException(status_code=502, detail="AI 未能分析该题")
+    from ..models import LibraryItem
+    image_urls = [f"/api/images/u{user.id}_{iid}.jpg" for iid in image_ids]
+    wq = WrongQuestion(
+        user_id=user.id, source="photo" if image_ids else "text",
+        my_question=wrong_hint,
+        images=image_urls[:1], original_images=image_urls,
+        **norm,
+    )
+    db.add(wq)
+    db.flush()
+    if wq.knowledge_points:
+        from ..services.knowledge import touch_error
+        touch_error(db, user, wq.subject, wq.knowledge_points, unit=wq.unit)
+    for img in (wq.images or []):
+        fname = img.split("/")[-1]
+        db.add(LibraryItem(
+            user_id=user.id, subject=wq.subject, kind="wrong_question",
+            title=(wq.question_text or "错题照片")[:256],
+            content=(wq.wrong_reason or "")[:2000],
+            file_path=fname, file_name=fname, file_type="image/jpeg",
+            source="wrong_question", ocr_text=(wq.question_text or "")[:2000],
+            ocr_status="pending"))
+    db.commit()
+    db.refresh(wq)
+    summary = f"知识点{wq.knowledge_points} 错因:{(wq.wrong_reason or '')[:150]}"
+    background.add_task(_background_profile_update, user.id, wq.subject, summary)
+    return {"item": _serialize(wq)}
 
 
 @router.get("")

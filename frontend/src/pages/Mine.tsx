@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api, changesApi } from '../api'
+import { api, changesApi, libraryApi } from '../api'
 import {
   Btn,
   CardView,
@@ -28,7 +28,7 @@ import {
   IconTarget,
 } from '../icons'
 
-type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports' | 'changes'
+type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports' | 'changes' | 'bookmarks'
 
 export default function Mine() {
   const nav = useNavigate()
@@ -79,6 +79,7 @@ export default function Mine() {
           { value: 'goals', label: '目标' },
           { value: 'reports', label: '报告' },
           { value: 'changes', label: '变更' },
+          { value: 'bookmarks', label: '书签' },
         ]}
         value={tab}
         onChange={setTab}
@@ -90,6 +91,7 @@ export default function Mine() {
       {tab === 'goals' && <GoalsTab />}
       {tab === 'reports' && <ReportsTab />}
       {tab === 'changes' && <ChangesTab />}
+      {tab === 'bookmarks' && <BookmarksTab />}
     </div>
   )
 }
@@ -578,6 +580,53 @@ function ChangesTab() {
             </div>
           )}
           {c.undone && <div className="caption" style={{ marginTop: 6 }}>已撤销</div>}
+        </CardView>
+      ))}
+    </div>
+  )
+}
+
+
+function BookmarksTab() {
+  const nav = useNavigate()
+  const toast = useToast()
+  const { data, loading, reload } = useAsync(() => libraryApi.bookmarks(), [])
+
+  return (
+    <div className="col" style={{ marginTop: 14 }}>
+      <CardView variant="filled">
+        <div className="title-strong">⭐ 书签</div>
+        <p className="muted" style={{ lineHeight: 1.6 }}>
+          在图片查看器、错题详情、档案库中都可以加书签，这里统一查看。
+        </p>
+      </CardView>
+      {loading && <Loading />}
+      {!loading && !(data || []).length && (
+        <Empty icon="⭐" title="还没有书签" desc="查看图片时点 ☆ 即可收藏" />
+      )}
+      {(data || []).map((b: any) => (
+        <CardView key={b.id} variant="filled">
+          <div className="row">
+            <Badge tone="primary">{b.target_type === 'library_item' ? '档案' : b.target_type === 'wrong_question' ? '错题' : b.target_type === 'book_page' ? '书页' : '图片'}</Badge>
+            <div className="title-strong text-ellipsis" style={{ flex: 1 }}>{b.label || '未命名书签'}</div>
+            <span className="caption">{(b.created_at || '').slice(0, 10)}</span>
+          </div>
+          {b.note && <div className="caption" style={{ marginTop: 4 }}>{b.note}</div>}
+          <div className="row" style={{ marginTop: 8, gap: 8 }}>
+            <Btn variant="tonal" sm onClick={() => {
+              if (b.target_type === 'wrong_question') nav('/wrong/' + b.target_id)
+              else nav('/library')
+            }}>
+              前往
+            </Btn>
+            <Btn variant="text" sm onClick={async () => {
+              await libraryApi.deleteBookmark(b.id)
+              toast('已删除')
+              reload()
+            }}>
+              删除
+            </Btn>
+          </div>
         </CardView>
       ))}
     </div>

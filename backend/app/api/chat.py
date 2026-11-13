@@ -201,6 +201,49 @@ def _build_system(db: Session, user: User, conv: Conversation) -> str:
     ) + "\n\n" + prompts.skill_protocol_system_prompt()
 
 
+@router.post("/conversations/{cid}/summary")
+async def make_summary(cid: int, user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """独立 Agent 生成对话摘要（不进入消息流）。"""
+    conv = db.query(Conversation).filter(Conversation.id == cid,
+                                         Conversation.user_id == user.id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    msgs = db.query(Message).filter(Message.conversation_id == cid).order_by(Message.id).all()
+    if not msgs:
+        raise HTTPException(status_code=400, detail="对话还没有内容")
+    dialogue = "\n".join(
+        f"{'学生' if m.role == 'user' else '导师'}：{(m.content or '')[:300]}" for m in msgs)[-5000:]
+    client = get_ai_client(db, user)
+    try:
+        text = await client.complete([
+            {"role": "system", "content":
+             "你是学习记录整理员。用简洁中文条目总结这段学习对话：讨论的知识点、学生的疑问点、"
+             "达成的结论、后续行动。不复述寒暄。Markdown 条目。"},
+            {"role": "user", "content": dialogue},
+        ], temperature=0.3)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI 总结失败：{e}")
+    from ..models import ConversationSummary
+    s = ConversationSummary(user_id=user.id, conversation_id=cid, content=text)
+    db.add(s)
+    db.commit()
+    db.refresh(s)
+    return {"id": s.id, "content": text, "created_at": s.created_at.isoformat()}
+
+
+@router.get("/conversations/{cid}/summaries")
+def list_summaries(cid: int, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    from ..models import ConversationSummary
+    rows = (db.query(ConversationSummary)
+            .filter(ConversationSummary.conversation_id == cid,
+                    ConversationSummary.user_id == user.id)
+            .order_by(ConversationSummary.created_at.desc()).all())
+    return [{"id": s.id, "content": s.content,
+             "created_at": s.created_at.isoformat() if s.created_at else None} for s in rows]
+
+
 @router.post("/conversations/{cid}/messages")
 def send_message(cid: int, payload: ChatMessageIn,
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):

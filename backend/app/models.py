@@ -41,6 +41,9 @@ class AppSettings(Base):
     model_assign: Mapped[dict] = mapped_column(JSON, default=dict)
     current_provider_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     current_model: Mapped[str] = mapped_column(String(128), default="")
+    nightly_time: Mapped[str] = mapped_column(String(8), default="23:00")  # 夜间整理时间 HH:MM
+    nightly_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    nightly_last_run: Mapped[str] = mapped_column(String(16), default="")  # YYYY-MM-DD
 
 
 class AIProvider(Base):
@@ -135,6 +138,7 @@ class KnowledgeNode(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     description: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(16), default="ai")  # ai | manual | chat_summary
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)  # 升年级归档
     pos_x: Mapped[float | None] = mapped_column(Float, nullable=True)
     pos_y: Mapped[float | None] = mapped_column(Float, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)

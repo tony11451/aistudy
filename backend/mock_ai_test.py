@@ -325,6 +325,34 @@ check("import_counts", r.json()["counts"].get("wrong_questions", 0) >= 1, r.text
 r = c.get("/api/wrong-questions", headers=H)
 check("import_roundtrip", r.json()["total"] >= 1)
 
+
+# 20. 对话摘要（独立 Agent，不进消息流）
+sum_conv = c.post("/api/chat/conversations", headers=H,
+                  json={"title": "summary-conv", "subject": "数学"}).json()
+c.post(f"/api/chat/conversations/{sum_conv['id']}/messages", headers=H,
+       json={"content": "因式分解怎么写", "image_ids": []})
+r = c.post(f"/api/chat/conversations/{sum_conv['id']}/summary", headers=H, json={})
+check("summary_generate", r.status_code == 200 and bool(r.json()["content"]), r.text[:200])
+r2 = c.get(f"/api/chat/conversations/{sum_conv['id']}/summaries", headers=H)
+check("summary_list", len(r2.json()) == 1)
+hist = c.get(f"/api/chat/conversations/{sum_conv['id']}", headers=H)
+check("summary_not_in_messages", all("学习记录整理员" not in (m.get("content") or "") for m in hist.json()["messages"]))
+
+# 21. 夜间整理设置 + 手动触发
+r = c.put("/api/settings/nightly", headers=H, json={"nightly_time": "22:30", "nightly_enabled": True})
+check("nightly_settings", r.status_code == 200)
+r = c.get("/api/settings/nightly", headers=H)
+check("nightly_get", r.json()["nightly_time"] == "22:30")
+r = c.post("/api/library/nightly/run", headers=H, json={})
+check("nightly_run", r.status_code == 200 and r.json()["ok"], r.text[:200])
+
+# 22. 复习资料生成
+r = c.post("/api/library/review/generate", headers=H,
+           json={"subject": "数学", "focus": "期中复习", "days": 14})
+check("review_generate", r.status_code == 200 and bool(r.json().get("data")), r.text[:200])
+items = c.get("/api/library/items?kind=review", headers=H)
+check("review_in_library", items.json()["total"] >= 1)
+
 failed = [n for n, o in ok if not o]
 print(f"\n=== {len(ok) - len(failed)}/{len(ok)} passed ===")
 if failed:

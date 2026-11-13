@@ -50,6 +50,26 @@ init_db()
 @app.on_event("startup")
 def startup():
     init_db()
+    import asyncio
+
+    from .services.nightly import mark_nightly_ran, nightly_due, run_nightly_all
+
+    async def nightly_scheduler():
+        while True:
+            try:
+                db = SessionLocal()
+                due = nightly_due(db)
+                db.close()
+                if due:
+                    await run_nightly_all(SessionLocal)
+                    db = SessionLocal()
+                    mark_nightly_ran(db)
+                    db.close()
+            except Exception:
+                pass
+            await asyncio.sleep(60)
+
+    asyncio.get_event_loop().create_task(nightly_scheduler())
 
 
 @app.get("/api/health")

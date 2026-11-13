@@ -5,7 +5,7 @@ import { Btn, CardView, Loading, Sheet, TopBar, Badge, IconBtn } from '../ui'
 import { useAsync } from '../components'
 import { ImageViewer } from '../viewer'
 import { useToast } from '../store'
-import { IconCamera, IconDelete, IconPlus, IconImage } from '../icons'
+import { IconCamera, IconPlus, IconImage } from '../icons'
 
 export default function BookDetail() {
   const { id } = useParams()
@@ -15,6 +15,7 @@ export default function BookDetail() {
   const [page, setPage] = useState<any>(null)
   const [busy, setBusy] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+  const albumRef = useRef<HTMLInputElement>(null)
   const { data, loading, reload } = useAsync(
     () => libraryApi.bookPages(Number(id)),
     [id],
@@ -45,8 +46,22 @@ export default function BookDetail() {
         title={book?.name || '书本'}
         back={() => nav('/library')}
         right={
-          <IconBtn icon={<IconPlus size={20} />} label="添加页面" onClick={() => fileRef.current?.click()} />
+          <div className="row" style={{ gap: 2 }}>
+            <IconBtn icon={<IconImage size={20} />} label="相册选图" onClick={() => albumRef.current?.click()} />
+            <IconBtn icon={<IconPlus size={20} />} label="拍照加页" onClick={() => fileRef.current?.click()} />
+          </div>
         }
+      />
+      <input
+        ref={albumRef}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(e) => {
+          addPage(e.target.files)
+          e.target.value = ''
+        }}
       />
       <input
         ref={fileRef}
@@ -122,7 +137,21 @@ export default function BookDetail() {
         )}
       </Sheet>
 
-      {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
+      {viewImg && (
+        <ImageViewer
+          src={viewImg}
+          onClose={() => setViewImg(null)}
+          onDownload={() => page && libraryApi.download(Number(id), page.image_path)}
+          onBookmark={async () => {
+            await libraryApi.addBookmark({
+              target_type: 'book_page',
+              target_id: page?.id || 0,
+              label: `${data?.book?.name || '书'} P${page?.page_no || ''}`,
+            })
+            toast('已加书签')
+          }}
+        />
+      )}
     </div>
   )
 }

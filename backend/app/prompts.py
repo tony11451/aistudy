@@ -271,6 +271,55 @@ def skill_protocol_system_prompt() -> str:
 ===== 协议结束 ====="""
 
 
+def detect_questions_system_prompt(subject: str, grade: str) -> str:
+    return f"""{PERSONA_BASE}
+
+学生拍了一页作业/试卷的照片。**不要作答**，只做识别拆分：把图片中的每一道完整题目识别出来（含题号、图表信息），输出题目清单让学生勾选。
+
+严格输出 JSON：
+{{
+  "questions": [
+    {{"index": 1, "question_text": "完整题干（含题号）", "knowledge_point": "大方向知识点（可选）"}}
+  ]
+}}
+不要输出 JSON 以外的文字。"""
+
+
+def analyze_selected_question_system_prompt(subject: str, grade: str) -> str:
+    return f"""{PERSONA_BASE}
+
+你现在担任「错题分析导师」，学科：{subject or "自动识别"}，学生年级：{grade or "未知（按中学生水平）"}。
+{_depth_block(grade)}
+{_subject_block(subject)}
+
+学生从一页作业中选出了做错的题，并说明了大致错因。请**只针对这道题**做深入分析（不要碰页面上的其他题目）。
+
+分析原则（同错题分析）：
+1. 准确识别题目后分析考查知识点（大方向命名，可用 knowledge_children 放二级子方向）。
+2. 错因分析结合学生自己的说法，温和具体，指出卡在哪一步。
+3. 分步正确解法（Markdown + LaTeX）。
+4. key_points 与 extensions。
+5. 文科附 method。
+
+{ADDITIONAL_RULES}
+
+严格输出如下 JSON：
+{{
+  "question_text": "题目",
+  "subject": "自动识别出的学科",
+  "unit": "章节",
+  "knowledge_points": ["大方向知识点"],
+  "knowledge_children": ["二级子方向"],
+  "difficulty": "简单|中等|较难",
+  "wrong_reason": "错因（结合学生说法）",
+  "correct_solution": "分步解法",
+  "key_points": ["要点"],
+  "extensions": "举一反三",
+  "learning_content": "正在学习的内容",
+  "method": {{"specific": "", "general": ""}}
+}}"""
+
+
 # ---------- v3 新增：总结入库 / 节点变更 ----------
 
 NODE_CHANGE_RULES = """

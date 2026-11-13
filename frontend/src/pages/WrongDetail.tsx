@@ -166,7 +166,26 @@ export default function WrongDetail() {
         </Btn>
       </div>
 
-      {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
+      {viewImg && (
+        <ImageViewer
+          src={viewImg}
+          onClose={() => setViewImg(null)}
+          onDownload={() => {
+            const a = document.createElement('a')
+            a.href = viewImg
+            a.download = 'wrong-question.jpg'
+            a.click()
+          }}
+          onBookmark={async () => {
+            await api.post('/api/library/bookmarks', {
+              target_type: 'wrong_question',
+              target_id: Number(id),
+              label: (w.question_text || '错题图片').slice(0, 30),
+            })
+            toast('已加书签')
+          }}
+        />
+      )}
     </div>
   )
 }

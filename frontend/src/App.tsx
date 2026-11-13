@@ -1,5 +1,7 @@
 import { HashRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { AuthProvider, ToastProvider, useAuth, useChatBadge, clearChatReady } from './store'
+import { Btn, Field, Sheet } from './ui'
+import { useState } from 'react'
 import { Loading, BottomNav } from './ui'
 import {
   IconBook,
@@ -76,6 +78,75 @@ function AppNav() {
   )
 }
 
+
+
+/** 全局 AI 浮球（需求 17）：任意页面唤起 AI，自动携带当前页面上下文 */
+function pageLabel(pathname: string): string {
+  if (pathname === '/') return '首页'
+  if (pathname === '/mindmap') return '知识图谱'
+  if (pathname === '/wrong') return '错题本'
+  if (pathname === '/wrong/new') return '错题录入'
+  if (pathname.startsWith('/wrong/')) return '错题详情'
+  if (pathname === '/chat') return '对话列表'
+  if (pathname.startsWith('/chat/')) return '对话'
+  if (pathname === '/library') return '档案库'
+  if (pathname.startsWith('/library/book/')) return '课本阅读'
+  if (pathname === '/mine') return '我的'
+  if (pathname === '/settings') return '设置'
+  return '当前页面'
+}
+
+function GlobalAIBall() {
+  const { pathname } = useLocation()
+  const nav = useNavigate()
+  const [open, setOpen] = useState(false)
+  const [text, setText] = useState('')
+  const label = pageLabel(pathname)
+  if (pathname.startsWith('/chat/')) return null
+  return (
+    <>
+      <button
+        className="ai-ball"
+        onClick={() => setOpen(true)}
+        aria-label="问 AI"
+      >
+        ✦
+      </button>
+      <Sheet open={open} onClose={() => setOpen(false)} title={`问 AI · ${label}`}>
+        <div className="col">
+          <div className="caption">
+            AI 会知道你在「{label}」并按需读取相关内容（图谱/错题/档案…）。
+          </div>
+          <Field label="想问什么" value={text} onChange={setText} multiline rows={3}
+                 placeholder="例如：帮我分析这个知识点 / 总结我最近的弱点" />
+          <Btn variant="filled" block onClick={() => {
+            const prompt = text.trim() || `请结合我当前所在的「${label}」页面内容，帮我做一次分析并给出建议。`
+            nav(`/chat?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent(prompt)}`)
+            setOpen(false)
+            setText('')
+          }}>
+            发送给 AI
+          </Btn>
+          <div className="row-wrap">
+            <Btn variant="tonal" sm onClick={() => {
+              nav(`/chat?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent('请读取我的图谱和档案，整理并精简我的弱点。')}`)
+              setOpen(false)
+            }}>
+              整理弱点
+            </Btn>
+            <Btn variant="tonal" sm onClick={() => {
+              nav(`/chat?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent('请根据我的历史错题重新评估知识点掌握度并更新。')}`)
+              setOpen(false)
+            }}>
+              按错题重评
+            </Btn>
+          </div>
+        </div>
+      </Sheet>
+    </>
+  )
+}
+
 function Guarded() {
   const { user, loading } = useAuth()
   const { pathname } = useLocation()
@@ -101,6 +172,7 @@ function Guarded() {
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      <GlobalAIBall />
       <AppNav />
     </>
   )

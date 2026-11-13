@@ -521,3 +521,33 @@ async def run_ocr(user: User = Depends(get_current_user), db: Session = Depends(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"OCR 失败：{e}")
     return result
+
+
+# ---------- 复习资料（需求 24） ----------
+@router.post("/review/generate")
+async def generate_review(payload: dict, user: User = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    from ..services.skills import generate_review_material
+    try:
+        result = await generate_review_material(db, user, {
+            "subject": payload.get("subject") or "",
+            "title": payload.get("title") or "",
+            "days": payload.get("days") or 14,
+            "focus": payload.get("focus") or "期中复习",
+        }, {})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"生成失败：{e}")
+    return {"ok": True, "summary": result.get("summary"), "data": result.get("data")}
+
+
+# ---------- 夜间整理手动触发（需求 21） ----------
+@router.post("/nightly/run")
+async def run_nightly_now(user: User = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    from ..services.nightly import mark_nightly_ran, run_nightly_for_user
+    try:
+        result = await run_nightly_for_user(db, user)
+        mark_nightly_ran(db)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"整理失败：{e}")
+    return {"ok": True, "result": result}

@@ -53,6 +53,7 @@ export default function Library() {
   const [uploadBoard, setUploadBoard] = useState(0)
   const [textForm, setTextForm] = useState({ title: '', content: '', board_id: 0 })
   const fileRef = useRef<HTMLInputElement>(null)
+  const albumRef = useRef<HTMLInputElement>(null)
   const [pendingKind, setPendingKind] = useState<'image' | 'attachment'>('image')
 
   const { data: ov, loading, reload } = useAsync(
@@ -119,6 +120,37 @@ export default function Library() {
         <Btn variant="text" sm disabled={busy === 'ocr'} onClick={runOcr}>
           {busy === 'ocr' ? 'OCR 中…' : '文字提取'}
         </Btn>
+        <Btn variant="text" sm disabled={busy === 'nightly'} onClick={async () => {
+          setBusy('nightly')
+          try {
+            const res = await api.post<any>('/api/library/nightly/run', {})
+            toast(`整理完成：OCR ${res.result?.ocr?.done || 0} 条${res.result?.report ? '，已生成简报' : ''}`)
+            reload()
+            reloadItems()
+          } catch (e: any) {
+            toast(e.message || '整理失败')
+          } finally {
+            setBusy('')
+          }
+        }}>
+          {busy === 'nightly' ? '整理中…' : '夜间整理'}
+        </Btn>
+        <Btn variant="tonal" sm disabled={busy === 'review'} onClick={async () => {
+          const focus = prompt('复习资料主题（如：期中复习 / 函数专题）', '期中复习')
+          if (focus === null) return
+          setBusy('review')
+          try {
+            await api.post('/api/library/review/generate', { subject, focus, days: 14 })
+            toast('复习资料已生成，见下方资料库')
+            reloadItems()
+          } catch (e: any) {
+            toast(e.message || '生成失败')
+          } finally {
+            setBusy('')
+          }
+        }}>
+          {busy === 'review' ? '生成中…' : '复习资料'}
+        </Btn>
       </div>
 
       {/* 搜索 + 筛选 */}
@@ -162,7 +194,11 @@ export default function Library() {
         <Btn variant="filled" sm leadingIcon={<IconCamera size={16} />} onClick={() => openUpload('image')}>
           拍照入库
         </Btn>
-        <Btn variant="tonal" sm leadingIcon={<IconImage size={16} />} onClick={() => openUpload('image')}>
+        <Btn variant="tonal" sm leadingIcon={<IconImage size={16} />} onClick={() => {
+          setPendingKind('image')
+          setUploadSubject(subject)
+          albumRef.current?.click()
+        }}>
           相册
         </Btn>
         <Btn variant="tonal" sm leadingIcon={<IconSparkle size={16} />} onClick={() => setShowUpload('text')}>
@@ -171,6 +207,17 @@ export default function Library() {
         <Btn variant="outlined" sm leadingIcon={<IconPlus size={16} />} onClick={() => openUpload('attachment')}>
           附件
         </Btn>
+        <input
+          ref={albumRef}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            doUpload(e.target.files)
+            e.target.value = ''
+          }}
+        />
         <input
           ref={fileRef}
           type="file"
@@ -466,7 +513,21 @@ export default function Library() {
         </div>
       </Sheet>
 
-      {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
+      {viewImg && (
+        <ImageViewer
+          src={viewImg}
+          onClose={() => setViewImg(null)}
+          onDownload={() => item && libraryApi.download(item.id, item.file_name || 'file')}
+          onBookmark={async () => {
+            await libraryApi.addBookmark({
+              target_type: 'library_item',
+              target_id: item?.id || 0,
+              label: item?.title || '资料图片',
+            })
+            toast('已加书签')
+          }}
+        />
+      )}
     </div>
   )
 }

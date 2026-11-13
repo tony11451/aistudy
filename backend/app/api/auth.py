@@ -79,6 +79,36 @@ def me(user: User = Depends(get_current_user)):
     return _user_dict(user)
 
 
+@router.post("/grade-up")
+async def grade_up(payload: dict, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    """升年级：学年总结 + 旧内容归档 + 新年级学科（需求 11）。"""
+    new_grade = str(payload.get("new_grade") or "").strip()
+    if new_grade not in ("初一", "初二", "初三", "高一", "高二", "高三"):
+        raise HTTPException(status_code=400, detail="年级无效")
+    from ..services.grade import grade_up as do_grade_up
+    try:
+        result = await do_grade_up(
+            db, user, new_grade,
+            new_subjects=payload.get("subjects"),
+            keep_weak=bool(payload.get("keep_weak")),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"升级失败：{e}")
+    return {"ok": True, **result}
+
+
+@router.get("/grade-options")
+def grade_options(user: User = Depends(get_current_user)):
+    from ..services.grade import NEXT_GRADE, suggested_subjects
+    nxt = NEXT_GRADE.get(user.grade or "")
+    return {
+        "current_grade": user.grade,
+        "next_grade": nxt,
+        "next_subjects": suggested_subjects(nxt) if nxt else [],
+    }
+
+
 def _user_dict(user: User) -> dict:
     return {
         "id": user.id,

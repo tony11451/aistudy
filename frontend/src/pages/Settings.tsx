@@ -10,6 +10,7 @@ import {
   Field,
   Loading,
   SelectField,
+  Sheet,
   TabsBar,
   TopBar,
   Badge,
@@ -48,6 +49,12 @@ export default function Settings() {
   const importRef = useRef<HTMLInputElement>(null)
   const [importScope, setImportScope] = useState<'personal' | 'full'>('personal')
   const [busy, setBusy] = useState('')
+  const [nightlyTime, setNightlyTime] = useState('23:00')
+  const [showGradeUp, setShowGradeUp] = useState(false)
+  const [gradeInfo, setGradeInfo] = useState<any>(null)
+  const [newSubjects, setNewSubjects] = useState<string[]>([])
+  const [keepWeak, setKeepWeak] = useState(true)
+  const [gradeBusy, setGradeBusy] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -73,6 +80,10 @@ export default function Settings() {
       const prov = await providersApi.list()
       setProviders(prov.providers || [])
       setCurrentRef(prov.current_model_ref || '')
+      api
+        .get<any>('/api/settings/nightly')
+        .then((n) => setNightlyTime(n.nightly_time || '23:00'))
+        .catch(() => {})
       if (user?.role === 'admin') {
         setUsers(await api.get<any[]>('/api/auth/users'))
       }
@@ -358,6 +369,22 @@ export default function Settings() {
           />
           <Field label="对话模型（留空用全局）" value={p.chat_model} onChange={(v) => setP({ ...p, chat_model: v })} />
           <Btn variant="filled" block onClick={savePersonal}>保存个人配置</Btn>
+
+          <CardView variant="filled">
+            <div className="title-strong">📈 升年级</div>
+            <p className="muted" style={{ lineHeight: 1.6 }}>
+              学年结束后一键升级：AI 生成学年总结存入档案库，旧图谱内容归档（可查），
+              按新年级调整学科。薄弱知识点可选择带入继续攻克。
+            </p>
+            <Btn variant="tonal" block style={{ marginTop: 10 }} onClick={async () => {
+              const info = await api.get<any>('/api/auth/grade-options')
+              setGradeInfo(info)
+              setNewSubjects(info.next_subjects || [])
+              setShowGradeUp(true)
+            }}>
+              开始升年级向导
+            </Btn>
+          </CardView>
         </div>
       )}
 
@@ -405,6 +432,28 @@ export default function Settings() {
       {/* ===== 数据：导出 / 导入（v4） ===== */}
       {tab === 'data' && (
         <div className="col" style={{ marginTop: 12 }}>
+          <CardView variant="filled">
+            <div className="title-strong">🌙 夜间自动整理</div>
+            <p className="muted" style={{ lineHeight: 1.6 }}>
+              每天在设定时间自动：OCR 提取新照片文字 → 归档 → 识别学习进度 → 生成当晚简报。
+            </p>
+            <div className="row" style={{ marginTop: 8 }}>
+              <div style={{ flex: 1 }}>
+                <Field label="整理时间（HH:MM）" value={nightlyTime}
+                       onChange={setNightlyTime} placeholder="23:00" />
+              </div>
+              <Btn variant="tonal" sm onClick={async () => {
+                await api.put('/api/settings/nightly', {
+                  nightly_time: nightlyTime,
+                  nightly_enabled: true,
+                })
+                toast('夜间整理时间已保存')
+              }}>
+                保存
+              </Btn>
+            </div>
+          </CardView>
+
           <CardView variant="filled">
             <div className="title-strong">数据导出 / 导入</div>
             <p className="muted" style={{ lineHeight: 1.6 }}>
@@ -496,6 +545,63 @@ export default function Settings() {
           ))}
         </div>
       )}
+
+
+      <Sheet open={showGradeUp} onClose={() => setShowGradeUp(false)} title="升年级向导">
+        <div className="col">
+          <div className="caption">
+            当前年级：{gradeInfo?.current_grade || '—'} → 目标年级：{gradeInfo?.next_grade || '高三（无下一档）'}
+          </div>
+          {!gradeInfo?.next_grade && <div className="muted">已经最高年级，无需升级。</div>}
+          {gradeInfo?.next_grade && (
+            <>
+              <div className="caption">新年级学科（可增减）：</div>
+              <ChipRow>
+                {GRADES.length > 0 &&
+                  Array.from(new Set([...(gradeInfo.next_subjects || []), ...SUBJECTS])).map((sub: any) => (
+                    <ChipFilter
+                      key={sub}
+                      label={newSubjects.includes(sub) ? `✓ ${sub}` : sub}
+                      selected={newSubjects.includes(sub)}
+                      onClick={() =>
+                        setNewSubjects(
+                          newSubjects.includes(sub)
+                            ? newSubjects.filter((x) => x !== sub)
+                            : [...newSubjects, sub],
+                        )
+                      }
+                    />
+                  ))}
+              </ChipRow>
+              <ChipFilter
+                label={keepWeak ? '✓ 薄弱知识点带入新年级继续攻克' : '薄弱知识点也一并归档'}
+                selected={keepWeak}
+                onClick={() => setKeepWeak(!keepWeak)}
+              />
+              <Btn variant="filled" block disabled={gradeBusy} onClick={async () => {
+                if (!confirm('确认升年级？旧内容将归档（保留可查），AI 会生成学年总结。')) return
+                setGradeBusy(true)
+                try {
+                  const res = await api.post<any>('/api/auth/grade-up', {
+                    new_grade: gradeInfo.next_grade,
+                    subjects: newSubjects,
+                    keep_weak: keepWeak,
+                  })
+                  toast(`已升级到 ${res.new_grade}：归档 ${res.archived_nodes} 个节点${res.summary_saved ? '，学年总结已入库' : ''}`)
+                  setShowGradeUp(false)
+                  load()
+                } catch (e: any) {
+                  toast(e.message || '升级失败')
+                } finally {
+                  setGradeBusy(false)
+                }
+              }}>
+                {gradeBusy ? 'AI 总结中…' : `确认升级到 ${gradeInfo?.next_grade}`}
+              </Btn>
+            </>
+          )}
+        </div>
+      </Sheet>
 
       {/* 供应商编辑对话框 */}
       <DialogBox

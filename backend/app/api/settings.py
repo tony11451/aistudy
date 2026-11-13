@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -123,3 +123,29 @@ def update_subjects(payload: dict, user: User = Depends(get_current_user),
     user.subjects = subjects[:20]
     db.commit()
     return {"ok": True, "subjects": user.subjects}
+
+
+@router.get("/nightly")
+def get_nightly(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    row = _get_row(db)
+    return {"nightly_time": row.nightly_time or "23:00",
+            "nightly_enabled": row.nightly_enabled,
+            "nightly_last_run": row.nightly_last_run}
+
+
+@router.put("/nightly")
+def update_nightly(payload: dict, _: User = Depends(require_admin),
+                   db: Session = Depends(get_db)):
+    row = _get_row(db)
+    if "nightly_time" in payload:
+        t = str(payload.get("nightly_time") or "23:00")
+        try:
+            hh, mm = t.split(":")
+            int(hh), int(mm)
+            row.nightly_time = t[:8]
+        except Exception:
+            raise HTTPException(status_code=400, detail="时间格式应为 HH:MM")
+    if "nightly_enabled" in payload:
+        row.nightly_enabled = bool(payload["nightly_enabled"])
+    db.commit()
+    return {"ok": True}

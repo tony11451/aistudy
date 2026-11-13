@@ -1,13 +1,16 @@
-/** 图片查看器：双指捏合缩放、双击放大/还原、拖动平移 */
+/** 图片查看器：双指缩放、双击放大/还原、拖动平移、工具按钮（放大/缩小/书签/下载/关闭） */
 import { useEffect, useRef, useState } from 'react'
 import { IconClose, IconZoomIn } from './icons'
 
 interface Props {
   src: string
   onClose: () => void
+  onBookmark?: () => void
+  onDownload?: () => void
+  bookmarked?: boolean
 }
 
-export function ImageViewer({ src, onClose }: Props) {
+export function ImageViewer({ src, onClose, onBookmark, onDownload, bookmarked }: Props) {
   const [scale, setScale] = useState(1)
   const [offset, setOffset] = useState({ x: 0, y: 0 })
   const state = useRef({
@@ -27,6 +30,9 @@ export function ImageViewer({ src, onClose }: Props) {
   }, [])
 
   const s = state.current
+  const zoom = (factor: number) => {
+    setScale((sc) => Math.min(6, Math.max(1, sc * factor)))
+  }
 
   const onPointerDown = (e: React.PointerEvent) => {
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
@@ -72,9 +78,45 @@ export function ImageViewer({ src, onClose }: Props) {
 
   return (
     <div className="viewer-overlay" onClick={onClose}>
-      <button className="viewer-close bubble-action-btn" onClick={onClose}>
-        <IconClose size={16} /> 关闭
-      </button>
+      {/* 工具栏 */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 'calc(14px + env(safe-area-inset-top, 0px))',
+          left: 14,
+          right: 14,
+          display: 'flex',
+          justifyContent: 'flex-end',
+          gap: 8,
+          zIndex: 202,
+        }}
+      >
+        <button className="viewer-tool" onClick={() => zoom(1.3)} title="放大">
+          ＋
+        </button>
+        <button className="viewer-tool" onClick={() => zoom(1 / 1.3)} title="缩小">
+          －
+        </button>
+        {onDownload && (
+          <button className="viewer-tool" onClick={onDownload} title="下载">
+            ⬇
+          </button>
+        )}
+        {onBookmark && (
+          <button
+            className="viewer-tool"
+            onClick={onBookmark}
+            title="书签"
+            style={{ background: bookmarked ? 'var(--m3e-sys-color-primary)' : undefined }}
+          >
+            {bookmarked ? '★' : '☆'}
+          </button>
+        )}
+        <button className="viewer-tool" onClick={onClose} title="关闭">
+          <IconClose size={18} />
+        </button>
+      </div>
+
       <img
         className="viewer-img"
         src={src}
@@ -98,6 +140,7 @@ export function ImageViewer({ src, onClose }: Props) {
           display: 'flex',
           gap: 12,
           alignItems: 'center',
+          pointerEvents: 'none',
         }}
       >
         <IconZoomIn size={15} />

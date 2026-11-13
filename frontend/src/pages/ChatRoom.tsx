@@ -1,8 +1,8 @@
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { api, compressImage, providersApi, changesApi, streamChat } from '../api'
-import { Btn, CardView, ChipFilter, ChipRow, Loading, Sheet, TopBar, Badge, IconBtn } from '../ui'
-import { Markdown } from '../components'
+import { api, compressImage, providersApi, changesApi, libraryApi, streamChat } from '../api'
+import { Btn, CardView, ChipFilter, ChipRow, Field, Loading, Sheet, TopBar, Badge, IconBtn } from '../ui'
+import { Markdown, useAsync } from '../components'
 import { ImageViewer } from '../viewer'
 import { useAuth, useToast, notifyChatReady, clearChatReady } from '../store'
 import {
@@ -10,6 +10,7 @@ import {
   IconCheck,
   IconClose,
   IconCopy,
+  IconImage,
   IconRefresh,
   IconSend,
   IconSparkle,
@@ -91,8 +92,17 @@ export default function ChatRoom() {
   const [providers, setProviders] = useState<any[]>([])
   const [showModel, setShowModel] = useState(false)
   const [viewImg, setViewImg] = useState<string | null>(null)
+  const [refs, setRefs] = useState<any[]>([])
+  const [showRefs, setShowRefs] = useState(false)
+  const [refQuery, setRefQuery] = useState('')
+  const [summaries, setSummaries] = useState<any[]>([])
+  const [showSummaries, setShowSummaries] = useState(false)
+  const [sumBusy, setSumBusy] = useState(false)
+  const sentAutoRef = useRef(false)
+  const pendingPromptRef = useRef('')
   const bottomRef = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const albumRef = useRef<HTMLInputElement>(null)
   const mountedRef = useRef(true)
 
   useEffect(() => {
@@ -126,9 +136,11 @@ export default function ChatRoom() {
         }
         const kp = params.get('kp')
         const wrong = params.get('wrong')
+        const ctxPage = params.get('ctx')
+        const autoPrompt = params.get('prompt') || ''
         const subject = params.get('subject') || ''
         const payload: any = {
-          title: kp ? `深聊 · ${kp}` : wrong ? '错题追问' : '新对话',
+          title: kp ? `深聊 · ${kp}` : wrong ? '错题追问' : ctxPage ? `AI · ${ctxPage}` : '新对话',
           subject,
           grade: user?.grade || '',
         }
@@ -141,7 +153,11 @@ export default function ChatRoom() {
           payload.subject = subject || w.subject
           payload.context_kind = 'wrong_question'
           payload.context_ref = String(wrong)
+        } else if (ctxPage) {
+          payload.context_kind = 'page'
+          payload.context_ref = ctxPage
         }
+        if (autoPrompt) pendingPromptRef.current = autoPrompt
         const c = await api.post<any>('/api/chat/conversations', payload)
         setConv(c)
         setIniting(false)
@@ -156,6 +172,17 @@ export default function ChatRoom() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  // 自动首问（全局浮球/预填提示词场景）
+  useEffect(() => {
+    if (conv && pendingPromptRef.current && !sentAutoRef.current && !busy) {
+      sentAutoRef.current = true
+      const p = pendingPromptRef.current
+      pendingPromptRef.current = ''
+      send(p)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conv, busy])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, liveSkills, liveChanges])
@@ -163,7 +190,16 @@ export default function ChatRoom() {
   const send = async (e?: FormEvent | string) => {
     if (typeof e === 'object' && e?.preventDefault) e.preventDefault()
     const override = typeof e === 'string' ? e : ''
-    const content = (override || input).trim()
+    let content = (override || input).trim()
+    // @引用：把所选错题/档案内容随消息带给 AI（需求 4）
+    const usedRefs = refs
+    if (usedRefs.length) {
+      const refText = usedRefs
+        .map((r: any) => `- 【${r.kindLabel}】${r.title}${r.text ? '：' + r.text.slice(0, 150) : ''}`)
+        .join('\n')
+      content = `${content || '请结合参考内容分析'}\n\n[参考内容]\n${refText}`
+      setRefs([])
+    }
     if (!content && !images.length) return
     if (!conv || busy) return
     const files = images
@@ -341,9 +377,19 @@ export default function ChatRoom() {
         title={conv?.title || (initing ? '创建对话…' : 'AI 对话')}
         back={() => nav('/chat')}
         right={
-          <Btn variant="text" sm onClick={() => setShowModel(true)}>
-            {modelRef ? modelNameOf(modelRef).slice(0, 12) : '模型'}
-          </Btn>
+          <div className="row" style={{ gap: 2 }}>
+            <Btn variant="text" sm onClick={() => {
+              setShowSummaries(true)
+              api.get<any>(`/api/chat/conversations/${conv?.id}/summaries`)
+                .then(setSummaries)
+                .catch(() => setSummaries([]))
+            }}>
+              摘要
+            </Btn>
+            <Btn variant="text" sm onClick={() => setShowModel(true)}>
+              {modelRef ? modelNameOf(modelRef).slice(0, 12) : '模型'}
+            </Btn>
+          </div>
         }
       />
 
@@ -506,6 +552,21 @@ export default function ChatRoom() {
           borderTop: '1px solid var(--m3e-sys-color-outline-variant)',
         }}
       >
+        {refs.length > 0 && (
+          <div className="row-wrap" style={{ marginBottom: 8 }}>
+            {refs.map((r: any) => (
+              <span key={r.kind + r.id} className="badge badge-primary" style={{ minHeight: 32 }}>
+                📎 {r.kindLabel} · {r.title.slice(0, 10)}
+                <button
+                  style={{ border: 'none', background: 'none', color: 'inherit', marginLeft: 4, cursor: 'pointer' }}
+                  onClick={() => setRefs((prev) => prev.filter((x) => !(x.kind === r.kind && x.id === r.id)))}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
         {images.length > 0 && (
           <div className="img-grid" style={{ marginBottom: 8, gridTemplateColumns: 'repeat(3,80px)' }}>
             {images.map((img, i) => (
@@ -523,7 +584,24 @@ export default function ChatRoom() {
           </div>
         )}
         <div className="row" style={{ gap: 8 }}>
+          <IconBtn icon={<IconImage size={20} />} label="引用错题/档案" onClick={() => setShowRefs(true)} />
           <IconBtn icon={<IconCamera size={20} />} label="拍照提问" onClick={() => fileRef.current?.click()} />
+          <IconBtn icon={<IconImage size={20} />} label="相册选图" onClick={() => albumRef.current?.click()} />
+          <input
+            ref={albumRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={async (e) => {
+              if (!e.target.files) return
+              const arr = await Promise.all(
+                Array.from(e.target.files).slice(0, 9).map((f) => compressImage(f)),
+              )
+              setImages((prev) => [...prev, ...arr].slice(0, 9))
+              e.target.value = ''
+            }}
+          />
           <input
             ref={fileRef}
             type="file"
@@ -599,7 +677,126 @@ export default function ChatRoom() {
         </p>
       </Sheet>
 
-      {viewImg && <ImageViewer src={viewImg} onClose={() => setViewImg(null)} />}
+      {/* @引用：错题 / 档案库（需求 4） */}
+      <Sheet open={showRefs} onClose={() => setShowRefs(false)} title="引用错题或档案内容">
+        <div className="col">
+          <Field label="搜索" value={refQuery} onChange={setRefQuery} placeholder="关键词" />
+          <RefPicker
+            query={refQuery}
+            selected={refs}
+            onToggle={(item: any) =>
+              setRefs((prev) =>
+                prev.some((r) => r.kind === item.kind && r.id === item.id)
+                  ? prev.filter((r) => !(r.kind === item.kind && r.id === item.id))
+                  : [...prev, item],
+              )
+            }
+          />
+          <Btn variant="filled" block onClick={() => setShowRefs(false)}>
+            <IconCheck size={16} /> 加入引用（{refs.length}）
+          </Btn>
+        </div>
+      </Sheet>
+
+      {/* 对话摘要（需求 15：独立 Agent，结果不进消息流） */}
+      <Sheet open={showSummaries} onClose={() => setShowSummaries(false)} title="对话摘要">
+        <div className="col">
+          <Btn variant="tonal" block disabled={sumBusy} onClick={async () => {
+            setSumBusy(true)
+            try {
+              const s = await api.post<any>(`/api/chat/conversations/${conv?.id}/summary`, {})
+              setSummaries((prev) => [s, ...prev])
+              toast('摘要已生成')
+            } catch (e: any) {
+              toast(e.message || '生成失败')
+            } finally {
+              setSumBusy(false)
+            }
+          }}>
+            {sumBusy ? 'AI 总结中…' : '生成本次对话摘要'}
+          </Btn>
+          {(summaries || []).map((s: any) => (
+            <CardView key={s.id} variant="filled">
+              <div className="caption">{(s.created_at || '').slice(0, 16).replace('T', ' ')}</div>
+              <Markdown text={s.content} />
+            </CardView>
+          ))}
+          {!summaries?.length && (
+            <div className="caption">还没有摘要。让 AI 把这段对话的要点沉淀下来，方便以后回顾。</div>
+          )}
+        </div>
+      </Sheet>
+
+      {viewImg && (
+        <ImageViewer
+          src={viewImg}
+          onClose={() => setViewImg(null)}
+          onDownload={() => {
+            const a = document.createElement('a')
+            a.href = viewImg
+            a.download = 'chat-image.jpg'
+            a.click()
+          }}
+          onBookmark={async () => {
+            await libraryApi.addBookmark({ target_type: 'image', target_id: 0, label: '聊天图片' })
+            toast('已加书签')
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+
+/** 引用选择器：历史错题 + 档案库内容（需求 4） */
+function RefPicker({ query, selected, onToggle }: {
+  query: string
+  selected: any[]
+  onToggle: (item: any) => void
+}) {
+  const wq = useAsync(
+    () => api.get<any>('/api/wrong-questions?limit=20' + (query ? '&keyword=' + encodeURIComponent(query) : '')),
+    [query],
+  )
+  const lib = useAsync(
+    () => libraryApi.search({ q: query, limit: 20 }),
+    [query],
+  )
+  const isSel = (kind: string, id: number) => selected.some((r) => r.kind === kind && r.id === id)
+  return (
+    <div className="col" style={{ maxHeight: '46vh', overflowY: 'auto' }}>
+      <div className="caption">历史错题</div>
+      {(wq.data?.items || []).map((w: any) => (
+        <CardView key={'w' + w.id} variant={isSel('wrong', w.id) ? 'elevated' : 'outlined'}
+                  onClick={() =>
+                    onToggle({
+                      kind: 'wrong',
+                      kindLabel: '错题',
+                      id: w.id,
+                      title: (w.question_text || '错题 ' + w.id).slice(0, 20),
+                      text: '错因：' + (w.wrong_reason || '').slice(0, 100),
+                    })
+                  }>
+          <div className="text-ellipsis" style={{ fontWeight: 600 }}>{w.question_text || '错题 #' + w.id}</div>
+          <div className="caption">{w.subject} · {(w.knowledge_points || []).join('、')}</div>
+        </CardView>
+      ))}
+      <div className="caption">档案库</div>
+      {(lib.data?.items || []).map((it: any) => (
+        <CardView key={'l' + it.id} variant={isSel('lib', it.id) ? 'elevated' : 'outlined'}
+                  onClick={() =>
+                    onToggle({
+                      kind: 'lib',
+                      kindLabel: it.kind === 'attachment' ? '附件' : it.kind === 'text' ? '资料' : '图片',
+                      id: it.id,
+                      title: it.title,
+                      text: (it.ocr_preview || it.content_preview || '').slice(0, 100),
+                    })
+                  }>
+          <div className="text-ellipsis" style={{ fontWeight: 600 }}>{it.title}</div>
+          <div className="caption">{it.subject} · {it.kind}</div>
+        </CardView>
+      ))}
     </div>
   )
 }

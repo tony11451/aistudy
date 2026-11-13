@@ -9,6 +9,13 @@
   --app-duration: var(--m3e-sys-motion-expressive-default-spatial-duration, 320ms);
   --app-font: 'Noto Sans SC', 'PingFang SC', 'HarmonyOS Sans SC', 'Microsoft YaHei',
     'Roboto', system-ui, sans-serif;
+  /* M3 官方 shape scale：0 / 4 / 8 / 12 / 16 / 28 / full */
+  --md-shape-xs: 4px;
+  --md-shape-sm: 8px;
+  --md-shape-md: 12px;
+  --md-shape-lg: 16px;
+  --md-shape-xl: 28px;
+  --md-shape-full: 999px;
   /* 中文优先字体栈覆盖库的 Roboto 定义（typescale 均引用这两个 token） */
   --m3e-ref-typeface-brand: var(--app-font);
   --m3e-ref-typeface-plain: var(--app-font);
@@ -437,6 +444,25 @@ a {
   z-index: 202;
 }
 
+.viewer-tool {
+  width: 42px;
+  height: 42px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font-size: 18px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 180ms var(--app-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+}
+
+.viewer-tool:active {
+  transform: scale(0.88);
+}
+
 .viewer-img {
   max-width: 100%;
   max-height: 100%;
@@ -601,6 +627,30 @@ a {
   transform: translate(-50%, -50%);
   z-index: 3;
   cursor: grab;
+}
+
+/* ============ 全局 AI 浮球（需求 17） ============ */
+.ai-ball {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--app-nav-height) + 86px + env(safe-area-inset-bottom, 0px));
+  width: 56px;
+  height: 56px;
+  border: none;
+  border-radius: var(--md-shape-lg, 16px);
+  background: var(--m3e-sys-color-tertiary-container, #ffd7f1);
+  color: var(--m3e-sys-color-on-tertiary-container, #2d1228);
+  font-size: 24px;
+  box-shadow: var(--m3e-sys-elevation-level3-shadow, 0 10px 28px rgba(0, 0, 0, 0.2));
+  cursor: pointer;
+  z-index: 45;
+  transition: transform 320ms var(--app-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
+    border-radius 320ms var(--app-ease, cubic-bezier(0.2, 0, 0, 1));
+}
+
+.ai-ball:active {
+  transform: scale(0.88) rotate(8deg);
+  border-radius: 50%;
 }
 
 /* ============ 动画 ============ */

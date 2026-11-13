@@ -183,6 +183,8 @@ export function CropModal({ file, onConfirm, onCancel }: Props) {
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState<'crop' | 'perspective'>('crop')
   const state = useRef({ img: null as HTMLImageElement | null, dragging: -1 })
+  const magCanvasRef = useRef<HTMLCanvasElement>(null)
+  const [mag, setMag] = useState<{ x: number; y: number } | null>(null)
 
   const draw = (rot: number, q: Pt[]) => {
     const canvas = canvasRef.current
@@ -236,6 +238,30 @@ export function CropModal({ file, onConfirm, onCancel }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rotation, quad])
 
+
+  const updateMagnifier = (clientX: number, clientY: number) => {
+    setMag({ x: clientX, y: clientY })
+    const src = canvasRef.current
+    const mc = magCanvasRef.current
+    if (!src || !mc) return
+    const rect = src.getBoundingClientRect()
+    const px = ((clientX - rect.left) / rect.width) * src.width
+    const py = ((clientY - rect.top) / rect.height) * src.height
+    const ctx = mc.getContext('2d')!
+    const zoom = 2.5
+    const region = 44
+    ctx.clearRect(0, 0, 140, 140)
+    ctx.drawImage(src, px - region / 2, py - region / 2, region, region, 0, 0, 140, 140)
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(70, 52)
+    ctx.lineTo(70, 88)
+    ctx.moveTo(52, 70)
+    ctx.lineTo(88, 70)
+    ctx.stroke()
+  }
+
   const posOf = (e: React.PointerEvent | PointerEvent): Pt => {
     const canvas = canvasRef.current!
     const rect = canvas.getBoundingClientRect()
@@ -263,12 +289,14 @@ export function CropModal({ file, onConfirm, onCancel }: Props) {
   const onMove = (e: React.PointerEvent) => {
     const idx = state.current.dragging
     if (idx < 0) return
+    updateMagnifier(e.clientX, e.clientY)
     const p = posOf(e)
     setQuad((q) => q.map((pt, i) => (i === idx ? p : pt)))
   }
 
   const onUp = () => {
     state.current.dragging = -1
+    setMag(null)
   }
 
   const autoDetect = () => {
@@ -350,11 +378,13 @@ export function CropModal({ file, onConfirm, onCancel }: Props) {
               onPointerDown={(e) => {
                 e.stopPropagation()
                 state.current.dragging = i
+                updateMagnifier(e.clientX, e.clientY)
                 ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
               }}
               onPointerMove={(e) => {
                 if (state.current.dragging !== i) return
                 e.stopPropagation()
+                updateMagnifier(e.clientX, e.clientY)
                 const canvas2 = canvasRef.current!
                 const rect2 = canvas2.getBoundingClientRect()
                 const p2 = {
@@ -363,10 +393,39 @@ export function CropModal({ file, onConfirm, onCancel }: Props) {
                 }
                 setQuad((q) => q.map((pt, j) => (j === i ? p2 : pt)))
               }}
-              onPointerUp={() => (state.current.dragging = -1)}
+              onPointerUp={() => {
+                state.current.dragging = -1
+                setMag(null)
+              }}
             />
           )
         })}
+
+        {mag && (
+          <div
+            style={{
+              position: 'fixed',
+              left: mag.x,
+              top: mag.y,
+              transform: 'translate(-50%, -135%)',
+              zIndex: 120,
+              pointerEvents: 'none',
+            }}
+          >
+            <canvas
+              ref={magCanvasRef}
+              width={140}
+              height={140}
+              style={{
+                width: 140,
+                height: 140,
+                borderRadius: '50%',
+                border: '3px solid #fff',
+                boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+              }}
+            />
+          </div>
+        )}
       </div>
 
       <div className="row" style={{ width: '100%', maxWidth: 560, marginTop: 14, gap: 8, flexWrap: 'wrap' }}>
