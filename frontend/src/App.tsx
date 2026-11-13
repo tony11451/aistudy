@@ -23,6 +23,7 @@ import ChatList from './pages/ChatList'
 import ChatRoom from './pages/ChatRoom'
 import Library from './pages/Library'
 import BookDetail from './pages/BookDetail'
+import Search from './pages/Search'
 import Mine from './pages/Mine'
 import Settings from './pages/Settings'
 
@@ -168,6 +169,7 @@ function Guarded() {
         <Route path="/chat/:id" element={<ChatRoom />} />
         <Route path="/library" element={<Library />} />
         <Route path="/library/book/:id" element={<BookDetail />} />
+        <Route path="/search" element={<Search />} />
         <Route path="/mine" element={<Mine />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

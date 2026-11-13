@@ -3,7 +3,7 @@ import { api } from '../api'
 import { Btn, CardView, Loading, Badge } from '../ui'
 import { MASTERY_LABEL, masteryTone, useAsync } from '../components'
 import { useAuth } from '../store'
-import { IconMap, IconCamera } from '../icons'
+import { IconMap, IconCamera, IconSearch } from '../icons'
 
 export default function Home() {
   const nav = useNavigate()
@@ -27,6 +27,16 @@ export default function Home() {
 
   return (
     <div className="page">
+      <div className="row" style={{ marginBottom: 8 }}>
+        <span className="spacer" />
+        <button
+          className="bubble-action-btn"
+          style={{ minHeight: 38 }}
+          onClick={() => nav('/search')}
+        >
+          <IconSearch size={15} /> 全局搜索
+        </button>
+      </div>
       <div className="hero">
         <h2>
           {greet}，{user?.display_name || '同学'}

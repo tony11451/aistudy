@@ -353,6 +353,17 @@ check("review_generate", r.status_code == 200 and bool(r.json().get("data")), r.
 items = c.get("/api/library/items?kind=review", headers=H)
 check("review_in_library", items.json()["total"] >= 1)
 
+
+# 23. 全局搜索（需求 23）：普通 + AI 高级
+r = c.get("/api/search?q=" + "因式分解", headers=H)
+gs = r.json()
+check("search_unified", "wrong_questions" in gs and "library" in gs
+      and "nodes" in gs and "conversations" in gs, str(list(gs.keys())))
+total_hits = sum(len(v) for k, v in gs.items() if isinstance(v, list))
+check("search_hits", total_hits >= 1, str(total_hits))
+r = c.post("/api/search/ai", headers=H, json={"q": "因式分解以前出现过吗", "subject": "数学"})
+check("search_ai", r.status_code == 200 and bool(r.json()["answer"]), r.text[:200])
+
 failed = [n for n, o in ok if not o]
 print(f"\n=== {len(ok) - len(failed)}/{len(ok)} passed ===")
 if failed:
