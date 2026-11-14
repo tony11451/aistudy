@@ -77,11 +77,15 @@ docker compose up -d --build
 ### 本机测试（Windows）
 
 ```bash
-cd E:\server\aistudy     # 或任意目录
-# .env 中 APP_PORT=5000（Windows 常保留 8000 附近端口段）
-docker compose up -d --build
-# 访问 http://localhost:5000
+# 用 deploy/deploy-local.ps1：同步代码 + 自动选可用端口 + 重建（推荐）
+powershell -ExecutionPolicy Bypass -File E:\server\aistudy\deploy.ps1
+# 或手动：
+cd E:\server\aistudy && docker compose up -d --build
 ```
+
+> ⚠️ Windows 的 WINNAT 动态排除端口段（如 8000/5000 常被占用），端口由 `deploy.ps1`
+> 自动探测写入 `.env`（APP_PORT=…）；手动部署时若报 `ports are not available`，
+> 换 `.env` 里的端口再 `docker compose up -d` 即可。
 
 ### 本地开发
 
