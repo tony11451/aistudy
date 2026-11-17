@@ -9,6 +9,7 @@ export interface UserInfo {
   role: string
   grade: string
   identity?: string
+  widgets?: string[]
 }
 
 interface AuthCtx {

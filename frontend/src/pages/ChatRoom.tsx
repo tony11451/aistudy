@@ -126,7 +126,7 @@ export default function ChatRoom() {
   useEffect(() => {
     const boot = async () => {
       try {
-        if (id) {
+        if (id && id !== 'new') {
           const res = await api.get<any>(`/api/chat/conversations/${id}`)
           setConv(res.conversation)
           setMessages(res.messages)
@@ -137,8 +137,16 @@ export default function ChatRoom() {
         const kp = params.get('kp')
         const wrong = params.get('wrong')
         const ctxPage = params.get('ctx')
+        const teacherSubject = params.get('teacher')
         const autoPrompt = params.get('prompt') || ''
         const subject = params.get('subject') || ''
+        if (teacherSubject) {
+          // 老师常驻流（v6：不单开对话）
+          const t = await api.post<any>('/api/chat/teacher-thread', { subject: teacherSubject })
+          pendingPromptRef.current = autoPrompt
+          nav(`/chat/${t.id}`, { replace: true })
+          return
+        }
         const payload: any = {
           title: kp ? `深聊 · ${kp}` : wrong ? '错题追问' : ctxPage ? `AI · ${ctxPage}` : '新对话',
           subject,

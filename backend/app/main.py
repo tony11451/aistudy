@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .api import auth, changes, chat, data, knowledge, library, providers, search, settings, wrong_questions
+from .api import auth, changes, chat, data, knowledge, library, providers, search, settings, wrong_questions, zhixue
 from .config import IMAGES_DIR
 from .database import Base, engine, SessionLocal
 from .models import AppSettings
@@ -30,10 +30,43 @@ app.include_router(chat.router)
 app.include_router(knowledge.router)
 app.include_router(library.router)
 app.include_router(search.router)
+app.include_router(zhixue.router)
+
+
+def ensure_columns():
+    """轻量迁移：为既有数据库补齐新增列（v5→v6 升级兼容）。"""
+    import sqlalchemy as sa
+    from sqlalchemy import text
+
+    insp = sa.inspect(engine)
+    existing_tables = set(insp.get_table_names())
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            continue
+        cols = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in cols:
+                continue
+            ddl_type = col.type.compile(engine.dialect)
+            default = ""
+            d = col.default
+            if d is not None and getattr(d, "is_scalar", False):
+                v = d.arg
+                if isinstance(v, bool):
+                    default = f" DEFAULT {1 if v else 0}"
+                elif isinstance(v, (int, float)):
+                    default = f" DEFAULT {v}"
+                elif isinstance(v, str):
+                    safe = v.replace("'", "''")
+                    default = f" DEFAULT '{safe}'"
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}{default}'))
 
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    ensure_columns()
     db = SessionLocal()
     try:
         if not db.query(AppSettings).filter(AppSettings.id == 1).first():

@@ -320,6 +320,32 @@ def analyze_selected_question_system_prompt(subject: str, grade: str) -> str:
 }}"""
 
 
+def tidy_item_system_prompt() -> str:
+    return f"""{PERSONA_BASE}
+
+你现在担任「学习资料整理员」。一份从智学网同步来的资料质量不佳（HTML 残留、内容为"略"等伪内容、
+题干含乱码实体、缺少解法）。请清洗与补全：
+
+规则：
+1. 去除 HTML 残留与实体（&nbsp; &deg; 等转正常字符）、乱码、多余空白与无意义填充。
+2. 若给出图片，以图片内容为准提取/补全文字。
+3. 对错题：输出规范题干（题号分值可精简保留）、**真实可用的正确解法**（Markdown + LaTeX 分步，
+   不要写"略"）、易错点提示（作为错因分析，若无学生作答信息则写该题常见易错点）。
+4. 判定有效性：与学习无关/纯乱码/纯空 → is_junk=true。
+5. 保留原意，不要编造图片中不存在的题目内容。
+
+严格输出 JSON：
+{{
+  "is_junk": false,
+  "title": "清洗后的标题",
+  "question_text": "清洗后的题干",
+  "correct_solution": "真实解法（Markdown+LaTeX）",
+  "wrong_reason": "易错点/错因提示",
+  "content": "清洗后的正文（非错题类资料用）"
+}}
+不要输出 JSON 以外的文字。"""
+
+
 # ---------- v3 新增：总结入库 / 节点变更 ----------
 
 NODE_CHANGE_RULES = """

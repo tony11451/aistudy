@@ -28,7 +28,7 @@ import {
   IconTarget,
 } from '../icons'
 
-type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports' | 'changes' | 'bookmarks'
+type Tab = 'progress' | 'profile' | 'methods' | 'goals' | 'reports' | 'changes' | 'nightly' | 'bookmarks'
 
 export default function Mine() {
   const nav = useNavigate()
@@ -79,6 +79,7 @@ export default function Mine() {
           { value: 'goals', label: '目标' },
           { value: 'reports', label: '报告' },
           { value: 'changes', label: '变更' },
+          { value: 'nightly', label: '夜审' },
           { value: 'bookmarks', label: '书签' },
         ]}
         value={tab}
@@ -91,6 +92,7 @@ export default function Mine() {
       {tab === 'goals' && <GoalsTab />}
       {tab === 'reports' && <ReportsTab />}
       {tab === 'changes' && <ChangesTab />}
+      {tab === 'nightly' && <NightlyTab />}
       {tab === 'bookmarks' && <BookmarksTab />}
     </div>
   )
@@ -574,9 +576,20 @@ function ChangesTab() {
           </div>
           {c.reason && <div className="caption">💡 {c.reason}</div>}
           {!c.undone && (
-            <div className="row" style={{ marginTop: 8 }}>
+            <div className="row" style={{ marginTop: 8, gap: 8 }}>
+              {c.status === 'pending' && (
+                <Btn variant="tonal" sm onClick={async () => {
+                  await changesApi.approve(c.id)
+                  toast('已允许')
+                  reload()
+                }}>
+                  允许
+                </Btn>
+              )}
               <span className="spacer" />
-              <Btn variant="outlined" sm onClick={() => undo(c.id)}>撤销此变更</Btn>
+              <Btn variant="outlined" sm onClick={() => undo(c.id)}>
+                {c.status === 'pending' ? '拒绝并撤销' : '撤销此变更'}
+              </Btn>
             </div>
           )}
           {c.undone && <div className="caption" style={{ marginTop: 6 }}>已撤销</div>}
@@ -586,6 +599,64 @@ function ChangesTab() {
   )
 }
 
+
+
+function NightlyTab() {
+  const toast = useToast()
+  const { data, loading, reload } = useAsync(() => api.get<any[]>('/api/settings/nightly/runs'), [])
+
+  const review = async (runId: number, action: 'approve' | 'revoke') => {
+    try {
+      await api.post(`/api/settings/nightly/runs/${runId}/review`, { action })
+      toast(action === 'approve' ? '已全部允许' : '已全部撤销')
+      reload()
+    } catch (e: any) {
+      toast(e.message || '操作失败')
+    }
+  }
+
+  return (
+    <div className="col" style={{ marginTop: 14 }}>
+      <CardView variant="filled">
+        <div className="title-strong">🌙 昨晚整理审核</div>
+        <p className="muted" style={{ lineHeight: 1.6 }}>
+          夜间自动整理（OCR/归档/进度/简报）的所有改动在这里逐条可见，
+          可整批允许或撤销。设置中可开启「自动审核」。
+        </p>
+      </CardView>
+      {loading && <Loading />}
+      {!loading && !(data || []).length && (
+        <Empty icon="🌙" title="还没有夜间整理记录" desc="到设置里配置夜间整理时间" />
+      )}
+      {(data || []).map((run: any) => (
+        <CardView key={run.id} variant="elevated">
+          <div className="row" style={{ gap: 8 }}>
+            <Badge tone="primary">{run.run_date}</Badge>
+            <Badge>{run.mode === 'fast_ocr' ? '快速OCR' : 'AI智能'}</Badge>
+            <Badge tone={run.status === 'approved' ? 'mastered' : run.status === 'revoked' ? 'weak' : 'improving'}>
+              {run.status === 'approved' ? '已允许' : run.status === 'revoked' ? '已撤销' : '待审核'}
+            </Badge>
+            <span className="spacer" />
+            <span className="caption">{(run.created_at || '').slice(11, 16)}</span>
+          </div>
+          <div className="caption" style={{ margin: '8px 0' }}>{run.summary}</div>
+          {(run.changes || []).map((c: any) => (
+            <div key={c.id} className="row" style={{ gap: 6, marginTop: 4 }}>
+              <span>{c.undone ? '✗' : c.status === 'approved' ? '✓' : '·'}</span>
+              <span className="caption clamp-2" style={{ flex: 1 }}>{c.description}</span>
+            </div>
+          ))}
+          {run.status === 'pending' && (
+            <div className="row" style={{ marginTop: 10, gap: 8 }}>
+              <Btn variant="filled" sm onClick={() => review(run.id, 'approve')}>全部允许</Btn>
+              <Btn variant="outlined" sm onClick={() => review(run.id, 'revoke')}>全部撤销</Btn>
+            </div>
+          )}
+        </CardView>
+      ))}
+    </div>
+  )
+}
 
 function BookmarksTab() {
   const nav = useNavigate()

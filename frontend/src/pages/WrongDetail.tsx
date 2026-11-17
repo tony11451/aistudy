@@ -62,7 +62,7 @@ export default function WrongDetail() {
               className="badge badge-primary"
               style={{ border: 'none', cursor: 'pointer', minHeight: 32 }}
               onClick={() =>
-                nav(`/chat?kp=${encodeURIComponent(k)}&subject=${encodeURIComponent(w.subject)}`)
+                nav(`/chat/new?kp=${encodeURIComponent(k)}&subject=${encodeURIComponent(w.subject)}`)
               }
             >
               🏷 {k}
@@ -157,7 +157,7 @@ export default function WrongDetail() {
           variant="filled"
           block
           leadingIcon={<IconChat size={18} />}
-          onClick={() => nav(`/chat?wrong=${w.id}&subject=${encodeURIComponent(w.subject)}`)}
+          onClick={() => nav(`/chat/new?wrong=${w.id}&subject=${encodeURIComponent(w.subject)}`)}
         >
           就这道题继续追问 AI
         </Btn>

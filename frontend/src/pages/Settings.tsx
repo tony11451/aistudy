@@ -20,7 +20,7 @@ import { useAuth, useToast } from '../store'
 import { useThemeMode } from '../ui'
 import { IconClose, IconPlus } from '../icons'
 
-type Tab = 'personal' | 'global' | 'providers' | 'subjects' | 'data' | 'users'
+type Tab = 'personal' | 'global' | 'providers' | 'subjects' | 'data' | 'users' | 'zhixue'
 
 export default function Settings() {
   const nav = useNavigate()
@@ -55,6 +55,13 @@ export default function Settings() {
   const [newSubjects, setNewSubjects] = useState<string[]>([])
   const [keepWeak, setKeepWeak] = useState(true)
   const [gradeBusy, setGradeBusy] = useState(false)
+  const [zxw, setZxw] = useState<any>(null)
+  const [zxwCookie, setZxwCookie] = useState('')
+  const [zxwBooklet, setZxwBooklet] = useState('')
+  const [zxwBusy, setZxwBusy] = useState('')
+  const [zxwRuns, setZxwRuns] = useState<any[]>([])
+  const [nightlyMode, setNightlyMode] = useState('ai_smart')
+  const [autoApprove, setAutoApprove] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -82,8 +89,15 @@ export default function Settings() {
       setCurrentRef(prov.current_model_ref || '')
       api
         .get<any>('/api/settings/nightly')
-        .then((n) => setNightlyTime(n.nightly_time || '23:00'))
+        .then((n) => {
+          setNightlyTime(n.nightly_time || '23:00')
+          setNightlyMode(n.nightly_mode || 'ai_smart')
+          setAutoApprove(!!n.auto_approve_nightly)
+        })
         .catch(() => {})
+      api.get<any>('/api/zhixue').then(setZxw).catch(() => {})
+      api.get<any>('/api/zhixue/bookmarklet').then((b) => setZxwBooklet(b.bookmarklet || '')).catch(() => {})
+      api.get<any[]>('/api/zhixue/sync-runs').then(setZxwRuns).catch(() => {})
       if (user?.role === 'admin') {
         setUsers(await api.get<any[]>('/api/auth/users'))
       }
@@ -236,6 +250,7 @@ export default function Settings() {
             : []),
           { value: 'personal' as Tab, label: '个人' },
           { value: 'subjects' as Tab, label: '学科' },
+          { value: 'zhixue' as Tab, label: '智学网' },
           { value: 'data' as Tab, label: '数据' },
           ...(user?.role === 'admin' ? [{ value: 'users' as Tab, label: '用户' }] : []),
         ]}
@@ -261,6 +276,174 @@ export default function Settings() {
           </ChipRow>
         </div>
       </CardView>
+
+
+      {tab === 'zhixue' && (
+        <div className="col" style={{ marginTop: 12 }}>
+          <CardView variant="filled">
+            <div className="title-strong">📚 智学网集成</div>
+            <p className="muted" style={{ lineHeight: 1.6 }}>
+              启用后自动把智学网的作业、考试成绩、错题本、原卷同步进档案库与错题本。
+              登录用 Cookie（推荐，NAS 可用）：登录智学网网页端后用书签脚本复制 Cookie。
+            </p>
+            <div className="row" style={{ marginTop: 8 }}>
+              <ChipFilter label={zxw?.enabled ? '✓ 已启用' : '启用集成'}
+                          selected={!!zxw?.enabled}
+                          onClick={async () => {
+                            await api.put('/api/zhixue', { enabled: !zxw?.enabled })
+                            const z = await api.get('/api/zhixue')
+                            setZxw(z)
+                          }} />
+              {zxw?.status && <Badge tone={zxw.status === 'ok' ? 'mastered' : 'weak'}>状态：{zxw.status}</Badge>}
+              {zxw?.last_sync_summary && <span className="caption">上次同步 {zxw.last_sync_summary}</span>}
+            </div>
+          </CardView>
+
+          <CardView variant="outlined">
+            <div className="title-strong">第 1 步：安装「复制 Cookie」书签</div>
+            <div className="caption" style={{ lineHeight: 1.7, margin: '6px 0' }}>
+              这个脚本<b>不在智学网里</b>——它是给浏览器<b>书签栏</b>用的小工具（一次安装，长期使用）：
+            </div>
+            {zxwBooklet && (
+              <>
+                <a
+                  href={zxwBooklet}
+                  className="badge badge-primary"
+                  style={{ minHeight: 44, fontSize: 15, justifyContent: 'center', textDecoration: 'none' }}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    toast('请按住这个按钮，拖到浏览器的书签栏上')
+                  }}
+                >
+                  📌 按住我，拖到浏览器书签栏
+                </a>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <Btn variant="tonal" sm onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(zxwBooklet)
+                      toast('脚本已复制，去书签管理器新建书签并粘贴到网址栏')
+                    } catch {
+                      toast('复制失败，请手动选中下方代码复制')
+                    }
+                  }}>
+                    复制脚本代码
+                  </Btn>
+                </div>
+                <details style={{ marginTop: 8 }}>
+                  <summary className="caption" style={{ cursor: 'pointer' }}>查看脚本代码</summary>
+                  <div className="caption" style={{ wordBreak: 'break-all', lineHeight: 1.5, marginTop: 6 }}>
+                    {zxwBooklet}
+                  </div>
+                </details>
+              </>
+            )}
+            <div className="caption" style={{ lineHeight: 1.7, margin: '10px 0 6px' }}>
+              <b>第 2 步：获取 Cookie</b><br />
+              1. 浏览器打开 edc.zhixue.com/login.html 并登录<br />
+              2. 点击书签栏里的「复制 Cookie」书签 → 自动复制<br />
+              3. 粘贴到下方保存<br />
+              <b>没有书签栏？</b>在智学网页面按 F12 → Application → Cookies →
+              全选复制 name=value 拼接，或直接用上面的复制脚本按钮。
+            </div>
+            <Field label="Cookie" value={zxwCookie} onChange={setZxwCookie} multiline
+                   placeholder="粘贴 document.cookie 内容" />
+            <Btn variant="filled" block disabled={zxwBusy === 'login'} onClick={async () => {
+              setZxwBusy('login')
+              try {
+                const r = await api.post<any>('/api/zhixue/login', { cookie: zxwCookie })
+                toast(r.message)
+                const z = await api.get('/api/zhixue')
+                setZxw(z)
+              } catch (e: any) {
+                toast(e.message || '登录失败')
+              } finally {
+                setZxwBusy('')
+              }
+            }}>
+              {zxwBusy === 'login' ? '验证中…' : '保存并验证 Cookie'}
+            </Btn>
+          </CardView>
+
+          <CardView variant="outlined">
+            <div className="title-strong">同步</div>
+            <div className="row" style={{ marginTop: 8, gap: 8, flexWrap: 'wrap' }}>
+              <Btn variant="tonal" sm disabled={zxwBusy === 'sync'} onClick={async () => {
+                setZxwBusy('sync')
+                try {
+                  const r = await api.post<any>('/api/zhixue/sync', { scope: 'all' })
+                  toast(`同步完成：新增 ${r.added} 更新 ${r.updated} 失败 ${r.failed}`)
+                  setZxwRuns(await api.get('/api/zhixue/sync-runs'))
+                  const z = await api.get('/api/zhixue')
+                  setZxw(z)
+                } catch (e: any) {
+                  toast(e.message || '同步失败')
+                } finally {
+                  setZxwBusy('')
+                }
+              }}>
+                {zxwBusy === 'sync' ? '同步中…' : '立即同步全部'}
+              </Btn>
+              <Btn variant="outlined" sm disabled={!!zxwBusy} onClick={async () => {
+                setZxwBusy('tidy')
+                try {
+                  const r = await api.post<any>('/api/zhixue/tidy', {})
+                  toast(`整理完成：修图 ${r.images_fixed} · 清坏图 ${r.images_dropped} · 清无效 ${r.junk_removed} · 去重 ${r.dup_removed}`)
+                } catch (e: any) {
+                  toast(e.message || '整理失败')
+                } finally {
+                  setZxwBusy('')
+                }
+              }}>
+                {zxwBusy === 'tidy' ? '整理中…' : '快速整理（免费）'}
+              </Btn>
+              <Btn variant="filled" sm disabled={!!zxwBusy} onClick={async () => {
+                if (!confirm('AI 深度整理会逐条清洗/补全资料（如“略”补全为真实解法），消耗一定 AI 额度，继续？')) return
+                setZxwBusy('ai-tidy')
+                try {
+                  const r = await api.post<any>('/api/zhixue/tidy', { ai: true })
+                  toast(`AI 整理完成：清洗 ${r.ai_cleaned || 0} · 补解法 ${r.ai_solutions_filled || 0} · 判无效 ${r.ai_junk_removed || 0}`)
+                } catch (e: any) {
+                  toast(e.message || '整理失败')
+                } finally {
+                  setZxwBusy('')
+                }
+              }}>
+                {zxwBusy === 'ai-tidy' ? 'AI 整理中…' : 'AI 深度整理'}
+              </Btn>
+              {['homework', 'exam', 'errorbook'].map((sc) => (
+                <Btn key={sc} variant="outlined" sm disabled={!!zxwBusy} onClick={async () => {
+                  setZxwBusy(sc)
+                  try {
+                    const r = await api.post<any>('/api/zhixue/sync', { scope: sc })
+                    toast(`${sc}：+${r.added}/~${r.updated}`)
+                    setZxwRuns(await api.get('/api/zhixue/sync-runs'))
+                  } catch (e: any) {
+                    toast(e.message || '同步失败')
+                  } finally {
+                    setZxwBusy('')
+                  }
+                }}>
+                  同步{sc === 'homework' ? '作业' : sc === 'exam' ? '考试' : '错题本'}
+                </Btn>
+              ))}
+            </div>
+          </CardView>
+
+          <div className="section-title" style={{ fontSize: '1.05rem' }}>同步记录</div>
+          {(zxwRuns || []).map((r: any) => (
+            <CardView key={r.id} variant="filled">
+              <div className="row">
+                <Badge tone="primary">{r.scope}</Badge>
+                <span className="caption">+{r.added} / ~{r.updated} / ✗{r.failed}</span>
+                <span className="spacer" />
+                <span className="caption">{(r.created_at || '').slice(0, 16).replace('T', ' ')}</span>
+              </div>
+              {r.message && <div className="caption clamp-2">{r.message}</div>}
+            </CardView>
+          ))}
+          {!zxwRuns?.length && <div className="caption">还没有同步记录</div>}
+        </div>
+      )}
 
       {/* ===== 供应商（v4 核心） ===== */}
       {tab === 'providers' && (

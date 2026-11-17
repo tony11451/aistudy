@@ -35,7 +35,12 @@ def get_or_create_node(db: Session, user: User, subject: str, name: str,
 
 def touch_error(db: Session, user: User, subject: str, names: list[str],
                 unit: str = "") -> list[KnowledgeNode]:
-    """错题场景：确保节点存在并累计错题数、置信度升级、掌握度标记薄弱。"""
+    """错题场景：记录出错（疑似记录），满足节奏才升级为弱点。
+
+    节奏规则（v6）：≥3 次 且 首末错跨 ≥3 天 → 确认弱点（mastery=weak, confidence=confirmed）；
+    单题/短期只累积次数，不再一题定弱点。
+    """
+    now = datetime.utcnow()
     touched = []
     parent = None
     if unit:
@@ -46,10 +51,16 @@ def touch_error(db: Session, user: User, subject: str, names: list[str],
             continue
         node = get_or_create_node(db, user, subject, name, parent.id if parent else None, "knowledge")
         node.error_count = (node.error_count or 0) + 1
-        node.updated_at = datetime.utcnow()
-        if node.error_count >= CONFIDENCE_THRESHOLD:
+        if not node.first_seen:
+            node.first_seen = now
+        node.last_seen = now
+        node.updated_at = now
+        span_days = (now - (node.first_seen or now)).days
+        if node.error_count >= 2:
             node.confidence = "confirmed"
-        node.mastery = "weak"
+        if node.error_count >= 3 and span_days >= 3:
+            node.mastery = "weak"
+            node.confidence = "confirmed"
         if node.learning_state != "learned":
             node.learning_state = "learning"
         touched.append(node)
@@ -99,11 +110,13 @@ def _auto_positions(db: Session, user: User, subject: str) -> None:
     db.commit()
 
 
-def build_mindmap(db: Session, user: User, subject: str, kind_filter: str = "") -> dict:
+def build_mindmap(db: Session, user: User, subject: str, kind_filter: str = "",
+                  include_archived: bool = False) -> dict:
     _auto_positions(db, user, subject)
     q = db.query(KnowledgeNode).filter(
-        KnowledgeNode.user_id == user.id, KnowledgeNode.subject == subject,
-        KnowledgeNode.archived.is_(False))
+        KnowledgeNode.user_id == user.id, KnowledgeNode.subject == subject)
+    if not include_archived:
+        q = q.filter(KnowledgeNode.archived.is_(False))
     nodes = q.order_by(KnowledgeNode.sort_order, KnowledgeNode.id).all()
     by_id = {n.id: n for n in nodes}
 
@@ -145,6 +158,7 @@ def build_mindmap(db: Session, user: User, subject: str, kind_filter: str = "") 
             "note": n.note,
             "description": n.description,
             "source": n.source,
+            "archived": bool(n.archived),
             "position": {"x": n.pos_x or 0, "y": n.pos_y or 0},
             "realId": n.id,
         })

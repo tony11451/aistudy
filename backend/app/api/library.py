@@ -304,51 +304,133 @@ async def upload_items(subject: str = "", kind: str = "image", board_id: int = 0
                        book_id: int = 0, page_no: int = 0,
                        files: list[UploadFile] = File(...),
                        user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from ..services.pipeline import extract_archive, file_hash, set_tags
+    from ..models import ProcessingQueue
+    import tempfile
+
     kind = kind if kind in ("image", "attachment", "text", "review", "wrong_question") else "image"
     saved = []
     for f in files[:12]:
         raw = await f.read()
-        if kind in ("image", "wrong_question", "review"):
-            try:
-                img = Image.open(io.BytesIO(raw)).convert("RGB")
-            except (UnidentifiedImageError, OSError):
-                raise HTTPException(status_code=400, detail=f"{f.filename} 不是有效图片")
-            iid = int(uuid.uuid4().int % 1_000_000_000)
-            fname = f"u{user.id}_{iid}.jpg"
-            img.save(IMAGES_DIR / fname, format="JPEG", quality=88)
-            item = LibraryItem(user_id=user.id, subject=subject or "",
-                               board_id=board_id or None,
-                               book_id=book_id or None,
-                               page_no=page_no or None,
-                               kind=kind, title=f.filename or "图片",
-                               file_path=fname, file_name=f.filename or fname,
-                               file_type="image/jpeg", source="upload",
-                               ocr_status="pending")
-        else:
-            # 附件/文本：保存原始文件（.txt/.md 直接读文字；其余提取文本）
-            ext = (f.filename or "").rsplit(".", 1)[-1].lower()
-            iid = int(uuid.uuid4().int % 1_000_000_000)
-            fname = f"u{user.id}_{iid}.bin"
-            (IMAGES_DIR / fname).write_bytes(raw)
-            text = ""
-            if ext in ("txt", "md", "csv", "json", "srt"):
-                text = raw.decode("utf-8", errors="ignore")[:20000]
-            elif ext == "pdf":
-                text = _extract_pdf_text(raw)[:20000]
-            elif ext == "docx":
-                text = _extract_docx_text(raw)[:20000]
-            item = LibraryItem(user_id=user.id, subject=subject or "",
-                               board_id=board_id or None,
-                               kind="attachment", title=f.filename or "附件",
-                               content=text, file_path=fname,
-                               file_name=f.filename or fname,
-                               file_type=ext or "bin", source="upload",
-                               ocr_status="done" if text else "none")
-        db.add(item)
-        db.flush()
-        saved.append(_item_dict(item))
+        fname_lower = (f.filename or "").lower()
+
+        # 压缩包：解压后逐个走上传逻辑（图片/文档）
+        if fname_lower.endswith((".zip", ".tar.gz", ".tgz", ".tar")):
+            tmp = IMAGES_DIR / f"u{user.id}_{uuid.uuid4().int % 1_000_000_000}.bin"
+            tmp.write_bytes(raw)
+            out_dir = IMAGES_DIR / f"extract_{tmp.stem}"
+            out_dir.mkdir(exist_ok=True)
+            entries = extract_archive(tmp, out_dir)
+            for ep in entries[:50]:
+                data = ep.read_bytes()
+                is_img = ep.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp", ".gif")
+                file_kind = "image" if is_img else "attachment"
+                r = _save_library_file(db, user, data, ep.name, file_kind, subject,
+                                       board_id or None, book_id or None, page_no)
+                if r:
+                    saved.append(r)
+            tmp.unlink(missing_ok=True)
+            continue
+
+        r = _save_library_file(db, user, raw, f.filename or "file", kind,
+                               subject, board_id or None, book_id or None, page_no)
+        if r:
+            saved.append(r)
     db.commit()
     return {"items": saved}
+
+
+def _save_library_file(db, user, raw: bytes, filename: str, kind: str, subject: str,
+                       board_id, book_id, page_no):
+    """入库单个文件：去重替换 + 日期 + 队列。返回条目摘要。"""
+    from ..services.pipeline import exif_date, file_hash, set_tags
+    from ..models import ProcessingQueue
+
+    fhash = file_hash(raw)
+    date_guess = datetime.now().strftime("%Y-%m-%d")
+
+    if kind in ("image", "wrong_question", "review"):
+        try:
+            img = Image.open(io.BytesIO(raw)).convert("RGB")
+        except (UnidentifiedImageError, OSError):
+            return None
+        dup = (db.query(LibraryItem)
+               .filter(LibraryItem.user_id == user.id, LibraryItem.file_hash == fhash,
+                       LibraryItem.file_hash != "")
+               .first())
+        if dup:
+            # 重复图片：替换原条目文件并重跑索引
+            fname = dup.file_path.split("/")[-1] if dup.file_path else f"u{user.id}_{uuid.uuid4().int % 1_000_000_000}.jpg"
+            img.save(IMAGES_DIR / fname, format="JPEG", quality=88)
+            dup.title = filename[:256]
+            dup.ocr_status = "pending"
+            db.flush()
+            db.add(ProcessingQueue(user_id=user.id, item_id=dup.id, task_kind="image",
+                                   mode="ai_smart", status="pending"))
+            return {"id": dup.id, "title": dup.title, "replaced": True,
+                "board_id": dup.board_id, "kind": dup.kind, "subject": dup.subject,
+                "content": (dup.content or "")[:200]}
+        iid = int(uuid.uuid4().int % 1_000_000_000)
+        fname = f"u{user.id}_{iid}.jpg"
+        img.save(IMAGES_DIR / fname, format="JPEG", quality=88)
+        item = LibraryItem(user_id=user.id, subject=subject or "",
+                           board_id=board_id, book_id=book_id,
+                           page_no=page_no or None,
+                           kind=kind, title=filename[:256],
+                           file_path=fname, file_name=filename[:256],
+                           file_type="image/jpeg", source="upload",
+                           file_hash=fhash, ocr_status="pending")
+    else:
+        ext = (filename or "").rsplit(".", 1)[-1].lower()
+        dup = (db.query(LibraryItem)
+               .filter(LibraryItem.user_id == user.id, LibraryItem.file_hash == fhash,
+                       LibraryItem.file_hash != "")
+               .first())
+        if dup:
+            text = _extract_text_by_ext(ext, raw)
+            if text:
+                dup.content = text
+            dup.title = filename[:256]
+            return {"id": dup.id, "title": dup.title, "replaced": True,
+                "board_id": dup.board_id, "kind": dup.kind, "subject": dup.subject,
+                "content": (dup.content or "")[:200]}
+        iid = int(uuid.uuid4().int % 1_000_000_000)
+        fname = f"u{user.id}_{iid}.bin"
+        (IMAGES_DIR / fname).write_bytes(raw)
+        text = _extract_text_by_ext(ext, raw)
+        item = LibraryItem(user_id=user.id, subject=subject or "",
+                           board_id=board_id,
+                           kind="attachment", title=filename[:256],
+                           content=text, file_path=fname,
+                           file_name=filename[:256],
+                           file_type=ext or "bin", source="upload",
+                           file_hash=fhash,
+                           ocr_status="done" if text else "none")
+    db.add(item)
+    db.flush()
+    # 日期 + 标签
+    date = exif_date(IMAGES_DIR / fname) if kind != "attachment" else ""
+    item.item_date = date or date_guess
+    set_tags(db, user, "library_item", item.id, {
+        "date": item.item_date,
+        "source": "上传",
+        "subject": subject or "",
+    })
+    db.add(ProcessingQueue(user_id=user.id, item_id=item.id, task_kind="image",
+                           mode="ai_smart", status="pending"))
+    return {"id": item.id, "title": item.title, "replaced": False,
+                "board_id": item.board_id, "kind": item.kind, "subject": item.subject,
+                "content": (item.content or "")[:200]}
+
+
+def _extract_text_by_ext(ext: str, raw: bytes) -> str:
+    if ext in ("txt", "md", "csv", "json", "srt"):
+        return raw.decode("utf-8", errors="ignore")[:20000]
+    if ext == "pdf":
+        return _extract_pdf_text(raw)[:20000]
+    if ext == "docx":
+        return _extract_docx_text(raw)[:20000]
+    return ""
 
 
 @router.post("/items/text")

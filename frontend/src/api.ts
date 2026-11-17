@@ -216,8 +216,12 @@ export const providersApi = {
 }
 
 export const changesApi = {
-  list: (limit = 50) => api.get<any[]>(`/api/changes?limit=${limit}`),
+  list: (limit = 50, status = '') =>
+    api.get<any[]>(`/api/changes?limit=${limit}${status ? `&status=${status}` : ''}`),
   undo: (id: number) => api.post<any>(`/api/changes/${id}/undo`),
+  approve: (id: number) => api.post<any>(`/api/changes/${id}/approve`),
+  batch: (ids: number[], action: 'approve' | 'revoke') =>
+    api.post<any>('/api/changes/approve-batch', { ids, action }),
 }
 
 export const dataApi = {

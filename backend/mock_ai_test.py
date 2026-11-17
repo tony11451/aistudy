@@ -155,8 +155,11 @@ check("analyze_batch", r.status_code == 200 and len(r.json()["items"]) == 2, r.t
 r = c.get("/api/knowledge/mindmap?subject=数学", headers=H)
 labels = [n["label"] for n in r.json()["nodes"]]
 check("mindmap_has_kp", "因式分解" in labels, str(labels))
-check("mindmap_mastery_weak", any(n.get("mastery") == "weak" and n["label"] == "因式分解"
-                                  for n in r.json()["nodes"]))
+# v6 弱点节奏：单题只累积疑似，不直接定弱点
+node_fp = next((n for n in r.json()["nodes"] if n["label"] == "因式分解"), {})
+check("weakness_paced_no_premature_weak",
+      node_fp.get("mastery") != "weak" and node_fp.get("confidence") == "suspected",
+      str(node_fp))
 
 # 5. 对话流式（含上下文注入）
 r = c.post("/api/chat/conversations", headers=H, json={"title": "t", "subject": "数学", "grade": "初三"})
@@ -317,7 +320,7 @@ import zipfile as _zipfile
 z = _zipfile.ZipFile(_io.BytesIO(exp.content))
 check("export_manifest", "manifest.json" in z.namelist() and "data.json" in z.namelist())
 manifest = json.loads(z.read("manifest.json"))
-check("export_version", manifest["version"] == 1 and manifest["kind"] == "personal", str(manifest))
+check("export_version", manifest["version"] == 2 and manifest["kind"] == "personal", str(manifest)[:120])
 r = c.post("/api/data/import?scope=personal", headers=H,
            files={"file": ("backup.zip", exp.content, "application/zip")})
 check("import_ok", r.status_code == 200 and r.json()["ok"], r.text[:300])

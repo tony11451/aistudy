@@ -934,3 +934,87 @@ SKILLS.update({
         "description": "针对弱点/近 N 天错题生成复习资料并存入档案库。参数：subject(可选)、title、days(默认14)、focus(可选)",
         "executor": generate_review_material},
 })
+
+
+# ===================== v6：教研组 / 读书 / 标签技能 =====================
+
+def post_teacher_note(db: Session, user: User, args: dict, ctx: dict) -> dict:
+    """写入教研组记录（各科老师共享的观察）。参数：content、subject、confidence(observed|likely|confirmed)"""
+    from .teachers import post_note
+    content = str(args.get("content") or "").strip()
+    if not content:
+        raise SkillError("content 为空")
+    note = post_note(db, user, str(args.get("author") or "teacher"),
+                     str(args.get("subject") or ""), content,
+                     str(args.get("confidence") or "observed"))
+    return {"summary": "观察已写入教研组记录", "data": note}
+
+
+def read_teacher_notes(db: Session, user: User, args: dict, ctx: dict) -> dict:
+    """读取教研组记录（老师间共享观察）。参数：subject(可选)、limit"""
+    from ..models import TeacherNote
+    q = db.query(TeacherNote).filter(TeacherNote.user_id == user.id)
+    if args.get("subject"):
+        q = q.filter(TeacherNote.subject == args["subject"])
+    rows = q.order_by(TeacherNote.created_at.desc()).limit(
+        min(int(args.get("limit") or 10), 30)).all()
+    return {"summary": f"已读取 {len(rows)} 条教研记录",
+            "data": [{"id": n.id, "author": n.author, "subject": n.subject,
+                      "content": n.content, "confidence": n.confidence,
+                      "created_at": n.created_at.isoformat() if n.created_at else None}
+                     for n in rows]}
+
+
+def read_book_range(db: Session, user: User, args: dict, ctx: dict) -> dict:
+    """按页码范围读取课本/笔记本多页文字（跨页/分批章节整合）。参数：book_id、from_page、to_page"""
+    from ..models import LibraryBook, LibraryPage
+    book_id = int(args.get("book_id") or 0)
+    fp = int(args.get("from_page") or 1)
+    tp = int(args.get("to_page") or fp)
+    pages = (db.query(LibraryPage)
+             .filter(LibraryPage.book_id == book_id, LibraryPage.user_id == user.id,
+                     LibraryPage.page_no >= fp, LibraryPage.page_no <= tp)
+             .order_by(LibraryPage.page_no).limit(30).all())
+    if not pages:
+        raise SkillError("指定页码范围内没有内容")
+    book = db.query(LibraryBook).filter(LibraryBook.id == book_id).first()
+    text = "\n\n".join(f"【第{p.page_no}页】\n{(p.ocr_text or '（待提取）')}" for p in pages)
+    return {"summary": f"已读取《{book.name if book else '?'}》第 {fp}-{tp} 页共 {len(pages)} 页",
+            "data": {"book": book.name if book else "", "pages": [p.page_no for p in pages],
+                     "text": text[:6000]}}
+
+
+def search_by_tags(db: Session, user: User, args: dict, ctx: dict) -> dict:
+    """按标签组合检索（日期/来源/题型/难度/重要度/自定义等）。参数：tags(dict 如 {"source":"智学网","date":"2025-09-01"})、limit"""
+    from ..models import ItemTag, LibraryItem
+    tags = args.get("tags") or {}
+    q = db.query(ItemTag).filter(ItemTag.user_id == user.id)
+    ids = None
+    for t, v in list(tags.items())[:6]:
+        rows = q.filter(ItemTag.tag_type == str(t), ItemTag.tag_value == str(v)).all()
+        cur = {r.target_id for r in rows}
+        ids = cur if ids is None else (ids & cur)
+        if not ids:
+            return {"summary": "没有匹配的资料", "data": []}
+    items = (db.query(LibraryItem)
+             .filter(LibraryItem.id.in_(list(ids)[:30]) if ids else False)
+             .limit(30).all())
+    return {"summary": f"标签检索到 {len(items)} 条",
+            "data": [{"id": it.id, "title": it.title, "subject": it.subject,
+                      "kind": it.kind, "item_date": it.item_date,
+                      "ocr_preview": (it.ocr_text or "")[:120]} for it in items]}
+
+SKILLS.update({
+    "post_teacher_note": {"kind": "write",
+        "description": "写入教研组记录（老师间共享观察）。参数：content、subject、confidence",
+        "executor": post_teacher_note},
+    "read_teacher_notes": {"kind": "read",
+        "description": "读取教研组记录。参数：subject(可选)、limit",
+        "executor": read_teacher_notes},
+    "read_book_range": {"kind": "read",
+        "description": "按页码范围读课本多页（跨页/章节整合）。参数：book_id、from_page、to_page",
+        "executor": read_book_range},
+    "search_by_tags": {"kind": "read",
+        "description": "按标签组合检索档案。参数：tags(dict)、limit",
+        "executor": search_by_tags},
+})

@@ -25,6 +25,7 @@ class User(Base):
     chat_model: Mapped[str] = mapped_column(String(128), default="")
     vision_model: Mapped[str] = mapped_column(String(128), default="")
     subjects: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    widgets: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 首页小组件配置
 
 
 class AppSettings(Base):
@@ -44,6 +45,8 @@ class AppSettings(Base):
     nightly_time: Mapped[str] = mapped_column(String(8), default="23:00")  # 夜间整理时间 HH:MM
     nightly_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     nightly_last_run: Mapped[str] = mapped_column(String(16), default="")  # YYYY-MM-DD
+    nightly_mode: Mapped[str] = mapped_column(String(16), default="ai_smart")  # ai_smart | fast_ocr
+    auto_approve_nightly: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class AIProvider(Base):
@@ -78,6 +81,8 @@ class ChangeLog(Base):
     before: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     after: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     undone: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(16), default="auto")  # auto|pending|approved|revoked
+    source: Mapped[str] = mapped_column(String(16), default="chat")  # chat|nightly
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -139,6 +144,8 @@ class KnowledgeNode(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     source: Mapped[str] = mapped_column(String(16), default="ai")  # ai | manual | chat_summary
     archived: Mapped[bool] = mapped_column(Boolean, default=False)  # 升年级归档
+    first_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # 弱点节奏：首次出错
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)   # 最近出错
     pos_x: Mapped[float | None] = mapped_column(Float, nullable=True)
     pos_y: Mapped[float | None] = mapped_column(Float, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -154,9 +161,10 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String(128), default="新对话")
     subject: Mapped[str] = mapped_column(String(32), default="")
     grade: Mapped[str] = mapped_column(String(16), default="")
-    context_kind: Mapped[str] = mapped_column(String(16), default="")  # "" | knowledge | wrong_question
+    context_kind: Mapped[str] = mapped_column(String(16), default="")  # "" | knowledge | wrong_question | page
     context_ref: Mapped[str] = mapped_column(String(64), default="")
     model_name: Mapped[str] = mapped_column(String(128), default="")
+    kind: Mapped[str] = mapped_column(String(16), default="")  # ""=普通 | teacher | coordinator
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
@@ -275,9 +283,13 @@ class LibraryItem(Base):
     file_path: Mapped[str] = mapped_column(String(256), default="")
     file_name: Mapped[str] = mapped_column(String(256), default="")
     file_type: Mapped[str] = mapped_column(String(32), default="")
-    source: Mapped[str] = mapped_column(String(16), default="manual")  # photo|upload|manual|wrong_question|generated
+    source: Mapped[str] = mapped_column(String(16), default="manual")  # photo|upload|manual|wrong_question|generated|zhixuewang
     ocr_text: Mapped[str] = mapped_column(Text, default="")
     ocr_status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|done|failed|none
+    file_hash: Mapped[str] = mapped_column(String(64), default="", index=True)  # 去重（SHA-256）
+    item_date: Mapped[str] = mapped_column(String(10), default="", index=True)  # 图上日期/上传日期 YYYY-MM-DD
+    external_id: Mapped[str] = mapped_column(String(64), default="", index=True)  # 外部来源 ID（智学网）
+    source_url: Mapped[str] = mapped_column(String(512), default="")  # 原始资源 URL（坏图重下）
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -315,4 +327,100 @@ class ConversationSummary(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id"), index=True)
     content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+# ===================== v6：教研组 / 队列 / 标签 / 智学网 =====================
+
+class TeacherNote(Base):
+    """教研组记录：各科老师/总AI/夜间整理写入的共享观察，互相可读。"""
+
+    __tablename__ = "teacher_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    author: Mapped[str] = mapped_column(String(32), default="")  # subject名 | coordinator | nightly
+    subject: Mapped[str] = mapped_column(String(32), default="", index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    confidence: Mapped[str] = mapped_column(String(16), default="observed")  # observed|likely|confirmed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ItemTag(Base):
+    """标签体系：日期/学期/来源/章节/知识点/题型/难度/重要度/内容类型/自定义。"""
+
+    __tablename__ = "item_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String(32), default="library_item")  # library_item|book_page|wrong_question
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    tag_type: Mapped[str] = mapped_column(String(32), index=True)  # date|term|subject|source|chapter|knowledge|qtype|difficulty|importance|content_type|page|custom
+    tag_value: Mapped[str] = mapped_column(String(128), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ProcessingQueue(Base):
+    """处理队列：上传内容的 去重→日期→归类→打标→OCR 流水线。"""
+
+    __tablename__ = "processing_queue"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    item_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 目标 LibraryItem
+    page_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 或书页
+    file_path: Mapped[str] = mapped_column(String(256), default="")
+    task_kind: Mapped[str] = mapped_column(String(32), default="image")  # image|attachment|archive
+    mode: Mapped[str] = mapped_column(String(16), default="ai_smart")  # ai_smart | fast_ocr
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)  # pending|processing|done|failed
+    stage: Mapped[str] = mapped_column(String(32), default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class NightlyRun(Base):
+    """夜间整理批次：变更清单 + 审核状态。"""
+
+    __tablename__ = "nightly_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    run_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+    mode: Mapped[str] = mapped_column(String(16), default="ai_smart")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    change_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|revoked
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ZhixueAccount(Base):
+    """智学网账号凭据（按用户）。"""
+
+    __tablename__ = "zhixue_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True, index=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    login_mode: Mapped[str] = mapped_column(String(16), default="cookie")  # cookie | playwright
+    cookie: Mapped[str] = mapped_column(Text, default="")
+    zxw_username: Mapped[str] = mapped_column(String(128), default="")
+    status: Mapped[str] = mapped_column(String(16), default="off")  # off|ok|cookie_expired|error
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_summary: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ZhixueSyncRun(Base):
+    """智学网同步批次记录。"""
+
+    __tablename__ = "zhixue_sync_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    scope: Mapped[str] = mapped_column(String(64), default="all")  # all|homework|exam|errorbook
+    added: Mapped[int] = mapped_column(Integer, default=0)
+    updated: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

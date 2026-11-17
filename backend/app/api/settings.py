@@ -130,6 +130,8 @@ def get_nightly(user: User = Depends(get_current_user), db: Session = Depends(ge
     row = _get_row(db)
     return {"nightly_time": row.nightly_time or "23:00",
             "nightly_enabled": row.nightly_enabled,
+            "nightly_mode": row.nightly_mode or "ai_smart",
+            "auto_approve_nightly": bool(row.auto_approve_nightly),
             "nightly_last_run": row.nightly_last_run}
 
 
@@ -147,5 +149,64 @@ def update_nightly(payload: dict, _: User = Depends(require_admin),
             raise HTTPException(status_code=400, detail="时间格式应为 HH:MM")
     if "nightly_enabled" in payload:
         row.nightly_enabled = bool(payload["nightly_enabled"])
+    if "nightly_mode" in payload:
+        if payload["nightly_mode"] in ("ai_smart", "fast_ocr"):
+            row.nightly_mode = payload["nightly_mode"]
+    if "auto_approve_nightly" in payload:
+        row.auto_approve_nightly = bool(payload["auto_approve_nightly"])
     db.commit()
     return {"ok": True}
+
+
+# ---------- 夜间整理审核（v6） ----------
+@router.get("/nightly/runs")
+def nightly_runs(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from ..models import NightlyRun
+    rows = (db.query(NightlyRun).filter(NightlyRun.user_id == user.id)
+            .order_by(NightlyRun.created_at.desc()).limit(15).all())
+    out = []
+    for r in rows:
+        changes = []
+        if r.change_ids:
+            from ..models import ChangeLog
+            changes = [{
+                "id": c.id, "description": c.description, "reason": c.reason,
+                "status": c.status, "undone": c.undone,
+            } for c in db.query(ChangeLog)
+                .filter(ChangeLog.id.in_(r.change_ids)).all()]
+        out.append({
+            "id": r.id, "run_date": r.run_date, "mode": r.mode,
+            "summary": r.summary, "status": r.status, "changes": changes,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+    return out
+
+
+@router.post("/nightly/runs/{run_id}/review")
+def review_nightly_run(run_id: int, payload: dict,
+                       user: User = Depends(get_current_user),
+                       db: Session = Depends(get_db)):
+    """整批审核：approve=全部允许 / revoke=全部撤销。"""
+    from ..models import ChangeLog, NightlyRun
+    from .changes import undo_change_record
+    run = db.query(NightlyRun).filter(NightlyRun.id == run_id,
+                                      NightlyRun.user_id == user.id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="批次不存在")
+    action = payload.get("action") or "approve"
+    done = 0
+    for cid in (run.change_ids or []):
+        c = db.query(ChangeLog).filter(ChangeLog.id == cid,
+                                       ChangeLog.user_id == user.id).first()
+        if not c:
+            continue
+        if action == "revoke":
+            if not c.undone:
+                undo_change_record(db, user, c)
+                done += 1
+        else:
+            c.status = "approved"
+            done += 1
+    run.status = "approved" if action == "approve" else "revoked"
+    db.commit()
+    return {"ok": True, "done": done, "status": run.status}

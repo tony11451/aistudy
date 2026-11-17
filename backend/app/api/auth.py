@@ -109,6 +109,16 @@ def grade_options(user: User = Depends(get_current_user)):
     }
 
 
+@router.put("/widgets")
+def update_widgets(payload: dict, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    """首页小组件配置（v6）：启用/排序。"""
+    widgets = [str(w) for w in (payload.get("widgets") or []) if w]
+    user.widgets = widgets[:12]
+    db.commit()
+    return {"ok": True, "widgets": user.widgets}
+
+
 def _user_dict(user: User) -> dict:
     return {
         "id": user.id,
@@ -116,6 +126,7 @@ def _user_dict(user: User) -> dict:
         "display_name": user.display_name or user.username,
         "role": user.role,
         "grade": user.grade,
+        "widgets": user.widgets or [],
         "identity": {"admin": "管理员", "student": "学生", "parent": "家长"}.get(user.role, "学生"),
     }
 

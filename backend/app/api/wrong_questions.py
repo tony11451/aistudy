@@ -104,7 +104,13 @@ async def analyze(payload: AnalyzeIn, background: BackgroundTasks,
         f"知识点{w.knowledge_points} 错因:{(w.wrong_reason or '')[:150]}" for w in rows
     )
     background.add_task(_background_profile_update, user.id, rows[0].subject, summary)
-    return {"items": [_serialize(w) for w in rows]}
+    # 汇入该科老师的常驻对话流（v6：不单开对话）
+    from ..services.teachers import post_to_teacher_thread
+    report = "\n\n".join(
+        f"## 新错题分析\n**题目**：{w.question_text[:120]}\n**错因**：{(w.wrong_reason or '')[:200]}\n"
+        f"**知识点**：{'、'.join(w.knowledge_points or [])}" for w in rows)
+    tid = post_to_teacher_thread(db, user, rows[0].subject or "综合", report[:4000])
+    return {"items": [_serialize(w) for w in rows], "teacher_thread_id": tid}
 
 
 @router.post("/detect-questions")
@@ -188,7 +194,12 @@ async def analyze_selected(payload: dict, background: BackgroundTasks,
     db.refresh(wq)
     summary = f"知识点{wq.knowledge_points} 错因:{(wq.wrong_reason or '')[:150]}"
     background.add_task(_background_profile_update, user.id, wq.subject, summary)
-    return {"item": _serialize(wq)}
+    from ..services.teachers import post_to_teacher_thread
+    report = (f"## 新错题分析\n**题目**：{(wq.question_text or '')[:120]}\n"
+              f"**错因**：{(wq.wrong_reason or '')[:200]}\n"
+              f"**知识点**：{'、'.join(wq.knowledge_points or [])}")
+    tid = post_to_teacher_thread(db, user, wq.subject or "综合", report[:4000])
+    return {"item": _serialize(wq), "teacher_thread_id": tid}
 
 
 @router.get("")

@@ -104,6 +104,7 @@ function GlobalAIBall() {
   const [text, setText] = useState('')
   const label = pageLabel(pathname)
   if (pathname.startsWith('/chat/')) return null
+  if (['/login', '/setup', '/register'].includes(pathname)) return null
   return (
     <>
       <button
@@ -122,7 +123,7 @@ function GlobalAIBall() {
                  placeholder="例如：帮我分析这个知识点 / 总结我最近的弱点" />
           <Btn variant="filled" block onClick={() => {
             const prompt = text.trim() || `请结合我当前所在的「${label}」页面内容，帮我做一次分析并给出建议。`
-            nav(`/chat?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent(prompt)}`)
+            nav(`/chat/new?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent(prompt)}`)
             setOpen(false)
             setText('')
           }}>
@@ -130,13 +131,13 @@ function GlobalAIBall() {
           </Btn>
           <div className="row-wrap">
             <Btn variant="tonal" sm onClick={() => {
-              nav(`/chat?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent('请读取我的图谱和档案，整理并精简我的弱点。')}`)
+              nav(`/chat/new?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent('请读取我的图谱和档案，整理并精简我的弱点。')}`)
               setOpen(false)
             }}>
               整理弱点
             </Btn>
             <Btn variant="tonal" sm onClick={() => {
-              nav(`/chat?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent('请根据我的历史错题重新评估知识点掌握度并更新。')}`)
+              nav(`/chat/new?ctx=${encodeURIComponent(label)}&prompt=${encodeURIComponent('请根据我的历史错题重新评估知识点掌握度并更新。')}`)
               setOpen(false)
             }}>
               按错题重评
@@ -166,6 +167,7 @@ function Guarded() {
         <Route path="/wrong/new" element={<Upload />} />
         <Route path="/wrong/:id" element={<WrongDetail />} />
         <Route path="/chat" element={<ChatList />} />
+        <Route path="/chat/new" element={<ChatRoom />} />
         <Route path="/chat/:id" element={<ChatRoom />} />
         <Route path="/library" element={<Library />} />
         <Route path="/library/book/:id" element={<BookDetail />} />

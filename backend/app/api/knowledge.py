@@ -16,8 +16,9 @@ router = APIRouter(prefix="/api", tags=["knowledge"])
 # ---------- 图谱 / 节点 ----------
 @router.get("/knowledge/mindmap")
 def mindmap(subject: str = Query("数学"), kind: str = Query(""),
+            include_archived: bool = Query(False),
             user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    return knowledge_svc.build_mindmap(db, user, subject, kind)
+    return knowledge_svc.build_mindmap(db, user, subject, kind, include_archived)
 
 
 @router.get("/knowledge/nodes")

@@ -74,6 +74,7 @@ export default function Mindmap() {
   const subjects = useSubjects()
   const [subject, setSubject] = useState('数学')
   const [kind, setKind] = useState<KindFilter>('')
+  const [incArchived, setIncArchived] = useState(false)
   const [selected, setSelected] = useState<any>(null)
   const [editName, setEditName] = useState('')
   const [editDesc, setEditDesc] = useState('')
@@ -82,8 +83,8 @@ export default function Mindmap() {
   const [busy, setBusy] = useState('')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { data, loading, error, reload } = useAsync(
-    () => api.get<any>(`/api/knowledge/mindmap?subject=${encodeURIComponent(subject)}&kind=${kind}`),
-    [subject, kind],
+    () => api.get<any>(`/api/knowledge/mindmap?subject=${encodeURIComponent(subject)}&kind=${kind}${incArchived ? '&include_archived=true' : ''}`),
+    [subject, kind, incArchived],
   )
 
   const flowNodes = useMemo(() => {
@@ -239,10 +240,11 @@ export default function Mindmap() {
         ))}
       </ChipRow>
 
-      <div className="row" style={{ padding: '4px 14px 6px', gap: 8 }}>
+      <div className="row" style={{ padding: '4px 14px 6px', gap: 8, flexWrap: 'wrap' }}>
         <ChipFilter label="全部" selected={kind === ''} onClick={() => setKind('')} />
         <ChipFilter label="仅知识点" selected={kind === 'knowledge'} onClick={() => setKind('knowledge')} />
         <ChipFilter label="仅弱点" selected={kind === 'weakness'} onClick={() => setKind('weakness')} />
+        <ChipFilter label="中考一轮（含归档）" selected={incArchived} onClick={() => setIncArchived(!incArchived)} />
         <span className="spacer" />
         <span className="caption">点击节点编辑 · 拖动保存位置</span>
       </div>
@@ -319,7 +321,7 @@ export default function Mindmap() {
               block
               onClick={() => {
                 setSelected(null)
-                nav(`/chat?kp=${encodeURIComponent(selected.label)}&subject=${encodeURIComponent(subject)}`)
+                nav(`/chat/new?kp=${encodeURIComponent(selected.label)}&subject=${encodeURIComponent(subject)}`)
               }}
               leadingIcon={<IconChat size={17} />}
             >

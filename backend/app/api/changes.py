@@ -1,11 +1,11 @@
-"""变更日志：列表 + 撤销（恢复 before 快照）。"""
+"""变更日志：列表 + 允许/撤销审核（v6：夜间改动默认待审）。"""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import (ChangeLog, KnowledgeNode, MethodCard, PracticeGoal,
-                      StudyProfile, User)
+from ..models import (ChangeLog, KnowledgeNode, LibraryItem, MethodCard,
+                      PracticeGoal, StudyProfile, User, WrongQuestion)
 from ..services.knowledge import get_or_create_node
 
 router = APIRouter(prefix="/api/changes", tags=["changes"])
@@ -13,16 +13,22 @@ router = APIRouter(prefix="/api/changes", tags=["changes"])
 
 @router.get("")
 def list_changes(limit: int = Query(50, le=200), undone: str = Query(""),
+                 status: str = Query(""), source: str = Query(""),
                  user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     q = db.query(ChangeLog).filter(ChangeLog.user_id == user.id)
     if undone == "0":
         q = q.filter(ChangeLog.undone.is_(False))
+    if status:
+        q = q.filter(ChangeLog.status == status)
+    if source:
+        q = q.filter(ChangeLog.source == source)
     rows = q.order_by(ChangeLog.created_at.desc()).limit(limit).all()
     return [{
         "id": c.id, "skill": c.skill, "action": c.action,
         "target_type": c.target_type, "target_id": c.target_id,
         "description": c.description, "reason": c.reason,
-        "undone": c.undone, "conversation_id": c.conversation_id,
+        "undone": c.undone, "status": c.status, "source": c.source,
+        "conversation_id": c.conversation_id,
         "created_at": c.created_at.isoformat() if c.created_at else None,
     } for c in rows]
 
@@ -63,16 +69,8 @@ def _restore_node(db: Session, user: User, snap: dict) -> int | None:
     return node.id
 
 
-@router.post("/{change_id}/undo")
-def undo_change(change_id: int, user: User = Depends(get_current_user),
-                db: Session = Depends(get_db)):
-    c = db.query(ChangeLog).filter(ChangeLog.id == change_id,
-                                   ChangeLog.user_id == user.id).first()
-    if not c:
-        raise HTTPException(status_code=404, detail="变更记录不存在")
-    if c.undone:
-        raise HTTPException(status_code=400, detail="该变更已撤销")
-
+def undo_change_record(db: Session, user: User, c: ChangeLog) -> None:
+    """执行撤销：恢复 before 快照（幂等由调用方保证）。"""
     if c.target_type == "node":
         if c.action == "create":
             node = db.query(KnowledgeNode).filter(
@@ -82,10 +80,7 @@ def undo_change(change_id: int, user: User = Depends(get_current_user),
                 db.query(KnowledgeNode).filter(KnowledgeNode.parent_id == node.id).delete(
                     synchronize_session=False)
                 db.delete(node)
-        elif c.action == "delete":
-            if c.before:
-                _restore_node(db, user, c.before)
-        else:  # update
+        else:
             if c.before:
                 _restore_node(db, user, c.before)
     elif c.target_type == "profile":
@@ -113,7 +108,90 @@ def undo_change(change_id: int, user: User = Depends(get_current_user),
                                             MethodCard.user_id == user.id).first()
             if m:
                 db.delete(m)
-
+    elif c.target_type == "library":
+        if c.action == "delete" and c.before:
+            it = LibraryItem(user_id=user.id, **{k: v for k, v in c.before.items()
+                                                 if hasattr(LibraryItem, k) and k != "id"})
+            db.add(it)
+        elif c.action == "create":
+            it = db.query(LibraryItem).filter(LibraryItem.id == c.target_id,
+                                              LibraryItem.user_id == user.id).first()
+            if it:
+                db.delete(it)
+        elif c.before:
+            it = db.query(LibraryItem).filter(LibraryItem.id == c.target_id,
+                                              LibraryItem.user_id == user.id).first()
+            if it:
+                for k, v in c.before.items():
+                    if hasattr(it, k) and k != "id":
+                        setattr(it, k, v)
+    elif c.target_type == "learning_items":
+        pass  # 进度类更新为累积性，撤销不回退
+    elif c.target_type == "wrong_question":
+        if c.action == "delete":
+            wq = WrongQuestion(user_id=user.id,
+                               subject=(c.before or {}).get("subject", "综合"),
+                               question_text=(c.before or {}).get("question_text", ""),
+                               correct_solution=(c.before or {}).get("correct_solution", ""),
+                               wrong_reason=(c.before or {}).get("wrong_reason", ""),
+                               images=(c.before or {}).get("images") or [],
+                               mastery="weak")
+            db.add(wq)
+        else:
+            wq = db.query(WrongQuestion).filter(WrongQuestion.id == c.target_id,
+                                                WrongQuestion.user_id == user.id).first()
+            if wq and c.before:
+                for k, v in c.before.items():
+                    if hasattr(wq, k) and k != "id":
+                        setattr(wq, k, v)
     c.undone = True
+    c.status = "revoked"
     db.commit()
+
+
+@router.post("/{change_id}/undo")
+def undo_change(change_id: int, user: User = Depends(get_current_user),
+                db: Session = Depends(get_db)):
+    c = db.query(ChangeLog).filter(ChangeLog.id == change_id,
+                                   ChangeLog.user_id == user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="变更记录不存在")
+    if c.undone:
+        raise HTTPException(status_code=400, detail="该变更已撤销")
+    undo_change_record(db, user, c)
     return {"ok": True, "description": c.description}
+
+
+@router.post("/{change_id}/approve")
+def approve_change(change_id: int, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    c = db.query(ChangeLog).filter(ChangeLog.id == change_id,
+                                   ChangeLog.user_id == user.id).first()
+    if not c:
+        raise HTTPException(status_code=404, detail="变更记录不存在")
+    c.status = "approved"
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/approve-batch")
+def approve_batch(payload: dict, user: User = Depends(get_current_user),
+                  db: Session = Depends(get_db)):
+    """批量允许/撤销。参数：ids(list)、action(approve|revoke)"""
+    ids = [int(i) for i in (payload.get("ids") or [])][:100]
+    action = payload.get("action") or "approve"
+    done = 0
+    for cid in ids:
+        c = db.query(ChangeLog).filter(ChangeLog.id == cid,
+                                       ChangeLog.user_id == user.id).first()
+        if not c:
+            continue
+        if action == "revoke":
+            if not c.undone:
+                undo_change_record(db, user, c)
+                done += 1
+        else:
+            c.status = "approved"
+            done += 1
+    db.commit()
+    return {"ok": True, "done": done}

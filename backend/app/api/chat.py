@@ -27,6 +27,7 @@ def _conv_dict(c: Conversation) -> dict:
         "grade": c.grade,
         "context_kind": c.context_kind,
         "context_ref": c.context_ref,
+        "kind": c.kind,
         "model_name": c.model_name,
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
@@ -154,6 +155,11 @@ async def summarize_conversation(cid: int, user: User = Depends(get_current_user
 
 
 def _build_system(db: Session, user: User, conv: Conversation) -> str:
+    # 教研组：老师/班主任的记忆体系（图谱+档案+教研记录+压缩摘要）
+    if conv.kind in ("teacher", "coordinator"):
+        from ..services.teachers import teacher_system_prompt
+        return teacher_system_prompt(db, user, conv.context_ref or conv.subject or "综合",
+                                     conv, is_coordinator=(conv.kind == "coordinator"))
     cfg = resolve_ai_config(db, user)
     extra = cfg["system_extra_prompt"]
     if conv.context_kind == "knowledge":
@@ -263,24 +269,30 @@ def send_message(cid: int, payload: ChatMessageIn,
     db.commit()
     db.refresh(user_msg)
 
-    history = (db.query(Message)
-               .filter(Message.conversation_id == cid)
-               .order_by(Message.id.desc())
-               .limit(MAX_CONTEXT_MESSAGES)
-               .all())[::-1]
+    if conv.kind in ("teacher", "coordinator"):
+        from ..services.teachers import history_messages, maybe_compact
+        maybe_compact(db, user, conv)
+        hist = history_messages(db, conv, MAX_CONTEXT_MESSAGES)
+    else:
+        _rows = (db.query(Message)
+                 .filter(Message.conversation_id == cid)
+                 .order_by(Message.id.desc())
+                 .limit(MAX_CONTEXT_MESSAGES)
+                 .all())[::-1]
+        hist = [{"role": m.role, "content": m.content, "images": m.images or []} for m in _rows]
 
     client = get_ai_client(db, user, conv.model_name)
     max_imgs = getattr(client, "max_images", 10)
     messages = [{"role": "system", "content": _build_system(db, user, conv)}]
-    for m in history:
-        if m.role == "user":
+    for m in hist:
+        if m["role"] == "user":
             messages.append({
                 "role": "user",
-                "content": build_user_content(m.content, m.images or [], user.id,
+                "content": build_user_content(m["content"], m["images"], user.id,
                                               max_images=max_imgs),
             })
         else:
-            messages.append({"role": "assistant", "content": m.content})
+            messages.append({"role": "assistant", "content": m["content"]})
 
     async def event_stream():
         collected = []
@@ -330,6 +342,34 @@ def send_message(cid: int, payload: ChatMessageIn,
     return StreamingResponse(event_stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache",
                                       "X-Accel-Buffering": "no"})
+
+
+
+
+# ---------- 教研组（v6）：老师常驻流 ----------
+@router.get("/teachers")
+def list_teachers(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    from ..models import Conversation as Conv
+    from ..services.teachers import get_coordinator_thread
+    coord = get_coordinator_thread(db, user)
+    rows = (db.query(Conv).filter(Conv.user_id == user.id, Conv.kind == "teacher")
+            .order_by(Conv.context_ref).all())
+    return {
+        "coordinator": _conv_dict(coord),
+        "teachers": [_conv_dict(c) for c in rows],
+    }
+
+
+@router.post("/teacher-thread")
+def teacher_thread(payload: dict, user: User = Depends(get_current_user),
+                   db: Session = Depends(get_db)):
+    """获取或创建某科老师的常驻对话流。"""
+    subject = str(payload.get("subject") or "").strip()
+    if not subject:
+        raise HTTPException(status_code=400, detail="缺少学科")
+    from ..services.teachers import get_teacher_thread
+    conv = get_teacher_thread(db, user, subject)
+    return _conv_dict(conv)
 
 
 def _sse(event: str, data: dict) -> str:
